@@ -31,3 +31,11 @@ def test_full_pipeline_mock(tmp_path, monkeypatch):
     for mf in op.moved:
         assert mf.new_path.exists()
     db.close()
+
+
+def test_gather_worker_count_has_env_cap(monkeypatch):
+    from folder1004 import pipeline
+
+    monkeypatch.setenv("FOLDER1004_GATHER_WORKERS", "3")
+    assert pipeline._gather_worker_count(10) == 3
+    assert pipeline._gather_worker_count(2) == 2

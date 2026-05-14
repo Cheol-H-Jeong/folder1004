@@ -41,24 +41,23 @@ def scan(
     def _walk(current: Path):
         try:
             with os.scandir(current) as it:
-                entries = list(it)
+                for entry in it:
+                    name = entry.name
+                    if _matches_any(name, ignore):
+                        continue
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        if recursive:
+                            _walk(Path(entry.path))
+                        continue
+                    if entry.is_file(follow_symlinks=False):
+                        results.append(Path(entry.path))
+                        if len(results) > max_files:
+                            raise ScanTooLargeError(len(results), max_files)
         except PermissionError as exc:
             log.warning("skip (permission): %s (%s)", current, exc)
             return
-        for entry in entries:
-            name = entry.name
-            if _matches_any(name, ignore):
-                continue
-            if entry.is_symlink():
-                continue
-            if entry.is_dir(follow_symlinks=False):
-                if recursive:
-                    _walk(Path(entry.path))
-                continue
-            if entry.is_file(follow_symlinks=False):
-                results.append(Path(entry.path))
-                if len(results) > max_files:
-                    raise ScanTooLargeError(len(results), max_files)
 
     _walk(root)
     return results

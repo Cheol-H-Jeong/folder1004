@@ -166,19 +166,25 @@ def parse_xlsx(path: Path, max_chars: int) -> str:
         return ""
     chunks: list[str] = []
     total = 0
-    for name in wb.sheetnames[:4]:
-        chunks.append(f"# Sheet: {name}")
-        ws = wb[name]
-        for row in ws.iter_rows(max_row=15, values_only=True):
-            cells = [str(c) for c in row if c is not None]
-            if not cells:
-                continue
-            row_txt = " | ".join(cells)
-            chunks.append(row_txt)
-            total += len(row_txt)
-            if total >= max_chars:
-                return _cap(chunks, max_chars)
-    return _cap(chunks, max_chars)
+    try:
+        for name in wb.sheetnames[:4]:
+            chunks.append(f"# Sheet: {name}")
+            ws = wb[name]
+            for row in ws.iter_rows(max_row=15, values_only=True):
+                cells = [str(c) for c in row if c is not None]
+                if not cells:
+                    continue
+                row_txt = " | ".join(cells)
+                chunks.append(row_txt)
+                total += len(row_txt)
+                if total >= max_chars:
+                    return _cap(chunks, max_chars)
+        return _cap(chunks, max_chars)
+    finally:
+        try:
+            wb.close()
+        except Exception:
+            pass
 
 
 def parse_legacy_office(path: Path, max_chars: int) -> str:

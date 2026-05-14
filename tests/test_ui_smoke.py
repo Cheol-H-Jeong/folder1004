@@ -159,6 +159,12 @@ def test_mainwindow_builds(tmp_path, monkeypatch):
     w.index_db.close()
 
 
+def test_cancel_path_never_force_terminates_qthread():
+    src = (Path(__file__).resolve().parents[1]
+           / "src" / "folder1004" / "ui" / "main.py").read_text(encoding="utf-8")
+    assert ".terminate(" not in src
+
+
 def test_organize_guidance_presets_are_hidden_toggles(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("APPDATA", str(tmp_path))

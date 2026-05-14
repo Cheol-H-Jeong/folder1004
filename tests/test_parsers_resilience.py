@@ -4,6 +4,7 @@ common real-world failure shapes — encrypted PDFs, malformed PPTX/
 DOCX, files that don't match their extension, etc.
 """
 import io
+import threading
 import zipfile
 from pathlib import Path
 
@@ -76,3 +77,34 @@ def test_zip_file_with_unexpected_content_does_not_raise(tmp_path):
         zf.writestr("garbage", "no slide xml here")
     p.write_bytes(buf.getvalue())
     assert extract_excerpt(p) == ""
+
+
+def test_large_supported_file_skips_body_parse(tmp_path, monkeypatch):
+    """Huge files should fall back to filename/metadata classification
+    instead of invoking memory-heavy body parsers."""
+    from folder1004.parsers import registry
+
+    p = tmp_path / "large.txt"
+    p.write_text("this would normally be parsed", encoding="utf-8")
+    monkeypatch.setattr(registry, "_MAX_PARSE_BYTES", 1)
+
+    assert registry.extract_excerpt(p, max_chars=200, timeout=0.1) == ""
+
+
+def test_parser_queue_saturation_skips_instead_of_piling_futures(tmp_path, monkeypatch):
+    """If parser slots are exhausted by slow native parsers, callers
+    must skip body extraction rather than enqueueing unbounded work."""
+    from folder1004.parsers import registry
+
+    sem = threading.BoundedSemaphore(1)
+    assert sem.acquire(blocking=False)
+    monkeypatch.setattr(registry, "_PARSE_SLOTS", sem)
+    monkeypatch.setattr(registry, "_PARSE_WORKERS", 1)
+    monkeypatch.setattr(registry, "_PARSE_QUEUE_SLOTS", 1)
+
+    try:
+        out = registry._safe(lambda _p, _n: "should not run", tmp_path / "a.pdf", 100, 0.1)
+    finally:
+        sem.release()
+
+    assert out == ""

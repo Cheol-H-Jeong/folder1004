@@ -13,8 +13,10 @@ The module also exposes :func:`current_log_path` for the UI to surface a
 from __future__ import annotations
 
 import datetime as _dt
+import faulthandler
 import logging
 import os
+import platform
 import re
 import sys
 import threading
@@ -28,6 +30,7 @@ _lock = threading.Lock()
 _active_handler: Optional[logging.Handler] = None
 _active_path: Optional[Path] = None
 _install_count = 0
+_thread_hook_installed = False
 
 
 # Patterns we MUST never write to disk.  Hits anywhere in a log record
@@ -89,13 +92,87 @@ def _silence_chatty_third_parties() -> None:
         logging.getLogger(name).setLevel(logging.WARNING)
 
 
+def _memory_snapshot() -> str:
+    """Return a small best-effort memory summary for crash diagnostics."""
+    try:
+        if sys.platform.startswith("win"):
+            import ctypes
+
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            stat = MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                mib = 1024 * 1024
+                return (
+                    f"mem_load={stat.dwMemoryLoad}% "
+                    f"phys={stat.ullAvailPhys // mib}/{stat.ullTotalPhys // mib}MiB "
+                    f"pagefile={stat.ullAvailPageFile // mib}/{stat.ullTotalPageFile // mib}MiB"
+                )
+        else:
+            import resource
+
+            rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            # Linux reports KiB, macOS reports bytes.
+            rss_mib = rss / 1024 if sys.platform.startswith("linux") else rss / (1024 * 1024)
+            return f"max_rss={rss_mib:.1f}MiB"
+    except Exception as exc:  # pragma: no cover - platform-dependent
+        return f"memory_snapshot_unavailable={exc}"
+    return "memory_snapshot_unavailable"
+
+
+def _install_exception_hooks() -> None:
+    global _install_count, _thread_hook_installed
+    if _install_count == 0:
+        previous = sys.excepthook
+
+        def _hook(exc_type, exc, tb):
+            logging.getLogger("folder1004.crash").error(
+                "Unhandled exception:\n%s",
+                "".join(traceback.format_exception(exc_type, exc, tb)),
+            )
+            previous(exc_type, exc, tb)
+
+        sys.excepthook = _hook
+        _install_count += 1
+
+    if not _thread_hook_installed and hasattr(threading, "excepthook"):
+        previous_thread_hook = threading.excepthook
+
+        def _thread_hook(args):  # type: ignore[no-untyped-def]
+            logging.getLogger("folder1004.crash").error(
+                "Unhandled thread exception in %s:\n%s",
+                getattr(args.thread, "name", "<unknown>"),
+                "".join(
+                    traceback.format_exception(
+                        args.exc_type, args.exc_value, args.exc_traceback
+                    )
+                ),
+            )
+            previous_thread_hook(args)
+
+        threading.excepthook = _thread_hook
+        _thread_hook_installed = True
+
+
 def start_session(tag: str = "session") -> Path:
     """Open a fresh log file for this run and return its path.
 
     Calling ``start_session`` again rotates to a new file.  Idempotent under
     threads — only one handler is ever attached.
     """
-    global _active_handler, _active_path, _install_count
+    global _active_handler, _active_path
     with _lock:
         paths = default_paths()
         paths.ensure()
@@ -107,6 +184,8 @@ def start_session(tag: str = "session") -> Path:
         root = logging.getLogger()
         if _active_handler is not None:
             try:
+                if faulthandler.is_enabled():
+                    faulthandler.disable()
                 root.removeHandler(_active_handler)
                 _active_handler.close()
             except Exception:
@@ -121,26 +200,28 @@ def start_session(tag: str = "session") -> Path:
             root.setLevel(logging.DEBUG)
         root.addHandler(handler)
 
-        # Also turn on full tracebacks for unhandled exceptions.
-        if _install_count == 0:
-            previous = sys.excepthook
-
-            def _hook(exc_type, exc, tb):
-                logging.getLogger("folder1004.crash").error(
-                    "Unhandled exception:\n%s",
-                    "".join(traceback.format_exception(exc_type, exc, tb)),
-                )
-                previous(exc_type, exc, tb)
-
-            sys.excepthook = _hook
-            _install_count += 1
+        _install_exception_hooks()
+        try:
+            faulthandler.enable(file=handler.stream, all_threads=True)
+        except Exception as exc:  # pragma: no cover - depends on runtime
+            logging.getLogger("folder1004.runlog").warning(
+                "faulthandler enable failed: %s", exc
+            )
 
         _silence_chatty_third_parties()
         _active_handler = handler
         _active_path = log_file
         logging.getLogger("folder1004.runlog").info(
-            "log session started: %s (pid=%d, python=%s)",
-            log_file, os.getpid(), sys.version.split()[0],
+            "log session started: %s (pid=%d, python=%s, platform=%s, "
+            "frozen=%s, exe=%s, cwd=%s, %s)",
+            log_file,
+            os.getpid(),
+            sys.version.split()[0],
+            platform.platform(),
+            bool(getattr(sys, "frozen", False)),
+            sys.executable,
+            os.getcwd(),
+            _memory_snapshot(),
         )
         return log_file
 

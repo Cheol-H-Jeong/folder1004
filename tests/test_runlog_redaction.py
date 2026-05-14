@@ -40,6 +40,7 @@ def test_redact_long_hex_token():
 def test_log_file_does_not_contain_secrets(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     log_path = start_session("pytest")
     log = logging.getLogger("folder1004.test")
     # The kind of line urllib3 / requests would produce verbatim:
@@ -54,3 +55,16 @@ def test_log_file_does_not_contain_secrets(tmp_path, monkeypatch):
     ):
         assert needle not in text, f"secret {needle!r} leaked into log file"
     assert "REDACTED" in text
+
+
+def test_log_session_records_runtime_diagnostics(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    log_path = start_session("pytestdiag")
+
+    text = log_path.read_text(encoding="utf-8")
+    assert "platform=" in text
+    assert "frozen=" in text
+    assert "exe=" in text
+    assert "mem" in text or "rss" in text

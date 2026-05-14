@@ -17,6 +17,42 @@ from .widgets import NavButton
 
 log = logging.getLogger(__name__)
 
+_qt_message_handler = None
+
+
+def _install_qt_message_logging() -> None:
+    """Route Qt warnings/fatal messages into the active run log.
+
+    PyInstaller GUI builds run without a console on Windows, so Qt/plugin
+    diagnostics otherwise disappear when the window closes unexpectedly.
+    """
+    global _qt_message_handler
+    if _qt_message_handler is not None:
+        return
+
+    def _handler(mode, context, message):  # type: ignore[no-untyped-def]
+        if mode == QtCore.QtMsgType.QtFatalMsg:
+            level = logging.CRITICAL
+        elif mode == QtCore.QtMsgType.QtCriticalMsg:
+            level = logging.ERROR
+        elif mode == QtCore.QtMsgType.QtWarningMsg:
+            level = logging.WARNING
+        else:
+            level = logging.DEBUG
+        where = ""
+        try:
+            if context and context.file:
+                where = f" ({context.file}:{context.line})"
+        except Exception:
+            where = ""
+        logging.getLogger("folder1004.qt").log(level, "%s%s", message, where)
+
+    _qt_message_handler = _handler
+    try:
+        QtCore.qInstallMessageHandler(_handler)
+    except Exception:
+        log.exception("failed to install Qt message handler")
+
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, config: Config, paths):
@@ -29,6 +65,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._thread: QtCore.QThread | None = None
         self._worker: OrganizeWorker | None = None
+        self._closing_after_worker = False
 
         self._build()
         self._apply_style()
@@ -174,24 +211,22 @@ class MainWindow(QtWidgets.QMainWindow):
         if hasattr(self, "organize_view"):
             self.organize_view.show_canceling()
         # Give the worker a brief grace window to stop on its own
-        # (next safe checkpoint), then forcibly tear it down so the UI
-        # never appears stuck.
+        # (next safe checkpoint).  Do NOT force-terminate QThread:
+        # on Windows that can kill a thread while pypdf/openpyxl/Qt is
+        # holding native resources and make the app disappear.
         QtCore.QTimer.singleShot(800, self._force_teardown_after_cancel)
 
     def _force_teardown_after_cancel(self):
         if self._thread is None:
             return
         if self._thread.isRunning():
-            # Last-resort: ask the event loop to quit and, if that does
-            # not return, terminate the OS thread.  The worker holds no
-            # locks on the main GUI state, so this is safe.
+            # Ask the thread event loop to quit, but never force-kill it.
+            # The worker checks the cancel flag between safe stages.
             self._thread.quit()
             if not self._thread.wait(400):
-                try:
-                    self._thread.terminate()
-                    self._thread.wait(400)
-                except Exception:
-                    pass
+                log.warning("worker still unwinding after cancel; waiting safely")
+                QtCore.QTimer.singleShot(1000, self._force_teardown_after_cancel)
+                return
         self._teardown_worker()
         self.organize_view.show_canceled()
 
@@ -201,10 +236,14 @@ class MainWindow(QtWidgets.QMainWindow):
         # refresh history list since we added a record
         if self.stack.currentWidget() is self.history_view:
             self.history_view.refresh()
+        if getattr(self, "_closing_after_worker", False):
+            self.close()
 
     def _on_failed(self, msg: str):
         self.organize_view.on_failed(msg)
         self._teardown_worker()
+        if getattr(self, "_closing_after_worker", False):
+            self.close()
 
     def _teardown_worker(self):
         if self._thread:
@@ -214,6 +253,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self._worker = None
 
     def closeEvent(self, event: QtGui.QCloseEvent):
+        if self._thread is not None and self._thread.isRunning():
+            log.info("close requested while worker is running; canceling safely")
+            self._closing_after_worker = True
+            if self._worker:
+                self._worker.cancel()
+            if hasattr(self, "organize_view"):
+                self.organize_view.show_canceling()
+            self.hide()
+            event.ignore()
+            return
         try:
             self._teardown_worker()
         finally:
@@ -230,6 +279,7 @@ def launch(argv: list[str] | None = None) -> int:
         start_session("gui")
     except Exception:
         pass
+    _install_qt_message_logging()
 
     QtWidgets.QApplication.setHighDpiScaleFactorRoundingPolicy(
         QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough

@@ -11,6 +11,7 @@ from typing import Callable, Optional
 
 import concurrent.futures as _futures
 import os
+import sys
 
 from .config import Config, default_paths, get_api_key
 from .index import IndexDB
@@ -28,6 +29,34 @@ from .scanner import scan
 log = logging.getLogger(__name__)
 
 ProgressCB = Callable[[str, float], None]
+
+
+def _env_int(name: str, default: int, *, min_value: int = 1) -> int:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        log.warning("invalid %s=%r; using %d", name, raw, default)
+        return default
+    return max(min_value, value)
+
+
+def _gather_worker_count(path_count: int) -> int:
+    """Bound the outer metadata/body-parse fanout.
+
+    Body extraction itself has a bounded parser pool.  Keeping the outer
+    pool modest prevents Windows installer builds from having many worker
+    threads simultaneously holding PDF/Office objects while waiting for
+    parser timeouts.  ``FOLDER1004_GATHER_WORKERS`` is intentionally an
+    environment diagnostic knob, not a persisted UI setting.
+    """
+    if path_count <= 0:
+        return 1
+    default_cap = 2 if sys.platform.startswith("win") else 4
+    cap = _env_int("FOLDER1004_GATHER_WORKERS", default_cap, min_value=1)
+    return max(1, min(path_count, cap))
 
 
 def gather_entries(
@@ -51,10 +80,10 @@ def gather_entries(
     # subsequent runs.  Keyed by (path, mtime, size).
     cache = ParserCache(default_paths().root / "parser_cache.db")
 
-    # Parallel parser pool: parsing is IO + CPU bound and the existing
-    # extract_excerpt already uses its own time-bounded ThreadPool, so a
-    # modest worker count here parallelises across files cleanly.
-    workers = max(2, min(8, (os.cpu_count() or 4)))
+    # Parallel metadata/excerpt fanout.  The actual parser dispatcher has
+    # its own small, bounded pool; do not multiply concurrency here.
+    workers = _gather_worker_count(len(paths))
+    log.info("gather_entries: %d files, %d outer worker(s)", len(paths), workers)
 
     def _parse_one(idx_p: tuple[int, "Path"]) -> Optional[FileEntry]:
         idx, p = idx_p
