@@ -1,8 +1,5 @@
 """Linux-specific shortcut behaviour."""
-import os
-import stat
 import sys
-from pathlib import Path
 
 import pytest
 

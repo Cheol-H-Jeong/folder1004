@@ -1,4 +1,3 @@
-from pathlib import Path
 
 from folder1004.metadata import collect
 

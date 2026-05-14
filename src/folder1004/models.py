@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -51,6 +51,9 @@ class Category:
     #   "mixed"     no meaningful time pattern
     duration: str = ""
     group: int = 0          # 1..9 — visual grouping prefix; 0 means ungrouped
+    # Exact existing top-level folder to reuse for modes that preserve
+    # folders.  Empty in new mode / normal LLM-created categories.
+    existing_folder: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -200,6 +203,10 @@ class OperationResult:
     operation_id: Optional[int] = None
     llm_usage: Optional[LLMUsage] = None
     report_path: Optional[Path] = None
+    # Local folder profile / health summary.  Kept as Any to avoid a
+    # models -> folder_profile import cycle while still letting the UI,
+    # reporter, and pipeline attach the dataclass.
+    folder_profile: Optional[Any] = None
     # Duplicates removed during this run: list of (deleted_path,
     # canonical_path, bytes_freed) — surfaced in the report so the
     # user knows what disappeared and why.

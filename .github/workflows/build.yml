@@ -26,9 +26,14 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install package + dev extras
+        shell: bash
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            pip install -e ".[dev,windows]"
+          else
+            pip install -e ".[dev]"
+          fi
 
       - name: Run tests (offscreen Qt)
         env:
@@ -54,7 +59,6 @@ jobs:
             output: "dist/Folder1004.app"
           - os: windows-latest
             artifact: Folder1004-Windows
-            build_cmd: "powershell -ExecutionPolicy Bypass -File scripts\\build_windows.ps1"
             output: "dist/folder1004"
     steps:
       - uses: actions/checkout@v4
@@ -70,9 +74,28 @@ jobs:
           else
             pip install -e ".[dev]"
           fi
-      - name: Build
+      - name: Build Unix bundle
+        if: runner.os != 'Windows'
         shell: bash
         run: ${{ matrix.build_cmd }}
+      - name: Build Windows bundle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\build_windows.ps1
+      - name: Smoke test Unix bundle
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p smoke-folder1004
+          printf 'hello\n' > smoke-folder1004/sample.txt
+          dist/folder1004/folder1004 --cli --path smoke-folder1004 --mock --dry-run --quiet
+      - name: Smoke test Windows bundle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force smoke-folder1004 | Out-Null
+          Set-Content -Path smoke-folder1004\sample.txt -Value 'hello'
+          .\dist\folder1004\folder1004.exe --cli --path smoke-folder1004 --mock --dry-run --quiet
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

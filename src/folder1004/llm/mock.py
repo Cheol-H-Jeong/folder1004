@@ -5,7 +5,7 @@ the pipeline is testable and resilient.
 from __future__ import annotations
 
 import re
-from collections import Counter, defaultdict
+from collections import Counter
 from typing import Iterable
 
 

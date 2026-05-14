@@ -4,7 +4,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pytest
 
 from folder1004.rolling import signature
 from folder1004.config import Config
@@ -329,7 +328,6 @@ def test_similarity_module_signal_axes():
     """Each of the 5 axes (S1 file core PN / S2 schema / S3 time /
     S4 path / S5 body PN) must score independently — verify with
     contrived inputs that the signal really fires."""
-    from datetime import date
     from pathlib import Path
     from folder1004 import similarity as sim
 
@@ -526,11 +524,7 @@ def test_rolling_end_to_end_with_fake_llm(tmp_path):
         def generate_json(self, prompt, **_kw):
             seen_prompts.append(prompt)
             # Look at the file rows in the prompt and assign each fid.
-            # Trust that the prompt JSON has "files":[{"i":N,...}].
             import re as _re
-            ids = [int(m) for m in _re.findall(r'"i"\s*:\s*(\d+)', prompt)]
-            # Distinct: fids appear in files block + possibly in
-            # categories — but we're early so categories are empty.
             new_cats = [
                 {"id": "drug-ai", "name": "의약품 AI 심사",
                  "description": "", "duration": "annual",
@@ -594,11 +588,6 @@ def test_singleton_absorption_collapses_tiny_categories():
     class _Fake:
         def generate_json(self, prompt, **_kw):
             import re
-            ids = [
-                int(m.group(1)) for m in re.finditer(
-                    r'\{"i":(\d+),"n":"([^"]+)"', prompt
-                )
-            ]
             files = list(re.finditer(r'\{"i":(\d+),"n":"([^"]+)"', prompt))
             new_cats = [
                 {"id": "lecture-ai", "name": "AI 강의자료",

@@ -1,5 +1,4 @@
 """End-to-end smoke test with the mock planner."""
-from pathlib import Path
 
 from folder1004.config import Config
 from folder1004.index import IndexDB

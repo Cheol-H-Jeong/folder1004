@@ -50,6 +50,40 @@ CLASSIFICATION_GUIDANCE_PRESETS = [
 ]
 
 
+def classification_guidance_text(
+    custom_text: str = "",
+    preset_names: list[str] | tuple[str, ...] | None = None,
+) -> str:
+    """Return the hidden preset guidance plus the user's visible extra text.
+
+    ``classification_guidance`` is intentionally reserved for the text the
+    user typed themselves.  Preset prompt bodies are not shown in the UI, but
+    the planner still needs their actual instructions when building LLM
+    prompts.  Unknown preset names are ignored so old/corrupt config values
+    cannot leak labels into prompts.
+    """
+    selected = [str(name).strip() for name in (preset_names or []) if str(name).strip()]
+    selected_set = set(selected)
+    parts = [
+        str(preset.get("text") or "").strip()
+        for preset in CLASSIFICATION_GUIDANCE_PRESETS
+        if str(preset.get("label") or "").strip() in selected_set
+        and str(preset.get("text") or "").strip()
+    ]
+    extra = (custom_text or "").strip()
+    if extra:
+        parts.append(extra)
+    return "\n\n".join(parts).strip()
+
+
+def combined_classification_guidance(cfg: "Config") -> str:
+    """Resolve all classification guidance stored on a Config object."""
+    return classification_guidance_text(
+        getattr(cfg, "classification_guidance", "") or "",
+        getattr(cfg, "classification_guidance_preset_names", []) or [],
+    )
+
+
 def _keyring_user_for(provider: str) -> str:
     p = (provider or "gemini").lower()
     if p in ("openai_compat", "openai", "compat"):
@@ -262,16 +296,14 @@ class Config:
     reclassify_mode: bool = False
 
     # User-facing organize mode chosen on the start screen:
-    #   "new"          신규 분류 — ignore every existing sub-folder,
-    #                 build the category catalogue from scratch.  Use
-    #                 the very first time the user organises a folder.
-    #   "incremental"  재분류 — keep the existing top-level folders as
-    #                 the canonical category list and only place new
-    #                 / unsorted files into them, appending a brand-new
-    #                 category only when no existing folder fits.  Use
-    #                 every subsequent time the user pours new files
-    #                 into a folder that Folder1004 has organised
-    #                 before.
+    #   "new"          모든 기존 폴더 갈아엎기 — ignore existing sub-folder
+    #                 names and build the category catalogue from scratch.
+    #   "incremental"  기존 폴더 유지하기 — keep existing top-level folders as
+    #                 the canonical category list and place files into them,
+    #                 appending a new category only when nothing fits.
+    #   "additive"     Folder1004로 이미 생성한 폴더만 유지하기 — keep only signed
+    #                 Folder1004 folders as the catalogue and skip files
+    #                 already inside them.
     organize_mode: str = "new"
 
     # Duplicate-file dedup threshold (bytes).  When ≥ 2 files share

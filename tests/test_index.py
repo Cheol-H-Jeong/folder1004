@@ -74,7 +74,7 @@ def _make_recorded_op(tmp_path: Path, src_name: str, dst_dir: str):
 
 def test_search_finds_by_filename_substring(tmp_path):
     db = IndexDB(tmp_path / "idx.db")
-    op_id = db.record_operation(_make_recorded_op(tmp_path, "한국지역_제안서_v1.pdf", "f1"))
+    db.record_operation(_make_recorded_op(tmp_path, "한국지역_제안서_v1.pdf", "f1"))
     hits = db.search("제안서")
     assert hits, "expected to find by Korean substring of filename"
     assert any("제안서" in h.new_path for h in hits)
@@ -213,6 +213,12 @@ def test_config_preset_round_trips_through_save_load(tmp_path, monkeypatch):
     assert loaded.active_preset == "로컬 Ollama"
     assert loaded.classification_guidance == "고객명과 기간을 우선해서 분류해줘."
     assert loaded.classification_guidance_preset_names == ["사람/고객 중심"]
+
+    from folder1004.config import combined_classification_guidance
+
+    combined = combined_classification_guidance(loaded)
+    assert "사람 이름" in combined
+    assert "고객명과 기간" in combined
     names = {p["name"] for p in loaded.llm_presets}
     assert names == {"회사 Gemini", "로컬 Ollama"}
     by_name = {p["name"]: p for p in loaded.llm_presets}

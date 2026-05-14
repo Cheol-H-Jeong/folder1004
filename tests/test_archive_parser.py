@@ -4,7 +4,6 @@ from __future__ import annotations
 import io
 import tarfile
 import zipfile
-from pathlib import Path
 
 from folder1004.parsers import archive, registry
 

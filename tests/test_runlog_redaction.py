@@ -7,9 +7,6 @@ contract — they run against a fresh log file in a temp dir so they
 never touch the user's real ``~/.folder1004/logs``.
 """
 import logging
-import os
-import re
-from pathlib import Path
 
 from folder1004.runlog import _redact, start_session
 

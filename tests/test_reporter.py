@@ -1,5 +1,4 @@
 from datetime import datetime
-from pathlib import Path
 
 from folder1004.models import Category, MovedFile, OperationResult
 from folder1004.reporter import emit_markdown

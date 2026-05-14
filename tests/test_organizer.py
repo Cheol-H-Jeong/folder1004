@@ -141,21 +141,21 @@ def test_compose_folder_name_per_duration():
     mixed = Category(id="e", name="기타", group=9,
                      time_label="", duration="mixed")
 
-    # Every name now carries the FA signature suffix so we can
+    # Every name now carries the Folder1004 signature suffix so we can
     # detect "this is a folder1004 folder" later.  The signature is
     # 6 hex chars derived from the category id.
     import re
-    fa = re.compile(r"\s\[FA·[a-f0-9]{4,12}\]$")
-    assert fa.search(compose_folder_name(burst))
+    folder1004 = re.compile(r"\s\[Folder1004·[a-f0-9]{4,12}\]$")
+    assert folder1004.search(compose_folder_name(burst))
     assert compose_folder_name(burst).startswith("2. 제안발표 (2024-03)")
     assert compose_folder_name(short).startswith("1. AVOCA (2024-Q3)")
     assert compose_folder_name(annual).startswith("3. 연간 보고 (2024)")
     name_multi = compose_folder_name(multi)
     assert name_multi.startswith("1. 범정부 초거대 AI 공통기반")
     assert "〈2023–2025〉" in name_multi
-    assert fa.search(name_multi)
+    assert folder1004.search(name_multi)
     assert compose_folder_name(mixed).startswith("9. 기타")
-    assert fa.search(compose_folder_name(mixed))
+    assert folder1004.search(compose_folder_name(mixed))
 
 
 def test_existing_folder_with_same_core_name_is_reused(tmp_path):
@@ -171,14 +171,96 @@ def test_existing_folder_with_same_core_name_is_reused(tmp_path):
     assignments = [Assignment(file_path=new_file, primary_category_id="avoca", primary_score=0.9)]
     op = Organizer(Config()).execute(tmp_path, Plan(cats, assignments))
 
-    # Folder name now carries the FA signature suffix.  Find it by
+    # Folder name now carries the Folder1004 signature suffix.  Find it by
     # the prefix and assert the legacy + new files both ended up
     # inside.
     matches = [d for d in tmp_path.iterdir() if d.is_dir()
                and d.name.startswith("1. AVOCA 시스템 (2024-Q3)")]
     assert matches, f"no folder matching prefix found in {list(tmp_path.iterdir())}"
     canonical = matches[0]
-    assert "[FA·" in canonical.name
+    assert "[Folder1004·" in canonical.name
     assert (canonical / "old.pptx").exists()
     assert (canonical / "new.pptx").exists()
     assert op.total_moved >= 2
+
+
+def test_seeded_existing_folder_is_reused_without_renaming_or_new_signature(tmp_path):
+    existing = tmp_path / "계약서"
+    existing.mkdir()
+    old_file = existing / "old.txt"
+    old_file.write_text("old")
+    new_file = tmp_path / "new.txt"
+    new_file.write_text("new")
+
+    cats = [
+        Category(
+            id="contracts-seed",
+            name="계약서",
+            group=1,
+            existing_folder=str(existing),
+        )
+    ]
+    assignments = [
+        Assignment(file_path=new_file, primary_category_id="contracts-seed", primary_score=0.9)
+    ]
+
+    op = Organizer(Config()).execute(tmp_path, Plan(cats, assignments))
+
+    assert existing.exists()
+    assert (existing / "old.txt").exists()
+    assert (existing / "new.txt").exists()
+    assert not any(
+        child.is_dir()
+        and child != existing
+        and "계약서" in child.name
+        for child in tmp_path.iterdir()
+    )
+    assert op.total_moved >= 2
+
+
+def test_seeded_folder1004_folder_is_reused_even_if_signature_would_differ(tmp_path):
+    existing = tmp_path / "1. 계약서 [Folder1004·abc123]"
+    existing.mkdir()
+    new_file = tmp_path / "contract.pdf"
+    new_file.write_text("contract")
+
+    cats = [
+        Category(
+            id="contract-new-id-that-hashes-differently",
+            name="계약서",
+            group=1,
+            existing_folder=str(existing),
+        )
+    ]
+    assignments = [
+        Assignment(
+            file_path=new_file,
+            primary_category_id="contract-new-id-that-hashes-differently",
+            primary_score=0.9,
+        )
+    ]
+
+    Organizer(Config()).execute(tmp_path, Plan(cats, assignments))
+
+    assert existing.exists()
+    assert (existing / "contract.pdf").exists()
+    same_visible = [child for child in tmp_path.iterdir() if child.is_dir() and "계약서" in child.name]
+    assert same_visible == [existing]
+
+
+def test_seeded_empty_existing_folder_is_not_swept(tmp_path):
+    existing = tmp_path / "빈 기존 폴더"
+    existing.mkdir()
+    other = tmp_path / "file.txt"
+    other.write_text("x")
+
+    cats = [
+        Category(id="empty", name="빈 기존 폴더", group=1, existing_folder=str(existing)),
+        Category(id="docs", name="문서", group=2),
+    ]
+    assignments = [Assignment(file_path=other, primary_category_id="docs", primary_score=0.9)]
+
+    Organizer(Config()).execute(tmp_path, Plan(cats, assignments))
+
+    assert existing.exists()
+    assert existing.is_dir()

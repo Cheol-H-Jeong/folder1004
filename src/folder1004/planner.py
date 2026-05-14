@@ -15,7 +15,7 @@ import logging
 import re
 from functools import lru_cache as _lru_cache
 from pathlib import Path
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Optional
 
 from .config import Config
 from .llm import LLMError, mock as mock_planner, prompts
@@ -58,7 +58,6 @@ def _parse_time_label_range(label: str):
     if m:
         y, q = int(m.group(1)), int(m.group(2))
         m0 = (q - 1) * 3 + 1
-        last_day = [31, 31, 30, 30][q - 1] if False else 31  # safe upper
         return date(y, m0, 1), date(y, m0 + 2, 28)
     m = _re.fullmatch(r"(\d{4})-H([12])", s)
     if m:
@@ -470,14 +469,16 @@ class Planner:
         self.config = config
         self.gemini = gemini
         self.cancel_check = cancel_check
-        # Pre-seeded categories for the *재분류 (incremental)* mode —
+        # Pre-seeded categories for the *기존 폴더 유지하기 (incremental)* mode —
         # the rolling planner starts with these as ``categories_so_far``
         # so the LLM places new files into existing folders instead of
         # inventing parallel ones.
         self.seed_categories: list[dict] = list(seed_categories or [])
 
     def _classification_guidance(self) -> str:
-        return (getattr(self.config, "classification_guidance", "") or "").strip()
+        from .config import combined_classification_guidance
+
+        return combined_classification_guidance(self.config)
 
     def _llm_call(
         self,
@@ -1102,7 +1103,6 @@ class Planner:
         min_size = int(getattr(self.config, "min_category_size", 3) or 3)
         if min_size >= 2:
             from collections import Counter
-            from pathlib import Path as _Path
             from . import similarity as _sim
             counts = Counter(a["primary"] for a in out_assigns)
             small_ids = {
@@ -1178,7 +1178,7 @@ class Planner:
                         a["primary"] = redirect[a["primary"]]
                         a["reason"] = (
                             (a.get("reason") or "")
-                            + f" · 자잘 폴더 흡수"
+                            + " · 자잘 폴더 흡수"
                         ).strip(" ·")
                 cum_cats = [
                     c for c in cum_cats
@@ -1686,6 +1686,7 @@ def _plan_from_dict(
                 time_label=str(c.get("time_label", "") or "").strip(),
                 duration=raw_dur,
                 group=group_val,
+                existing_folder=str(c.get("_existing_folder") or "").strip(),
             )
         )
     cat_ids = {c.id for c in cats}

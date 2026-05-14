@@ -11,7 +11,6 @@ from PySide6 import QtCore
 
 from .config import Config
 from .index import IndexDB
-from .models import OperationResult
 from .pipeline import run as run_pipeline
 
 

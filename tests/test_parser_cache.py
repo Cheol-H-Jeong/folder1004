@@ -1,4 +1,3 @@
-from pathlib import Path
 
 from folder1004.parser_cache import ParserCache
 

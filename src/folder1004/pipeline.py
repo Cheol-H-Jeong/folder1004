@@ -17,6 +17,7 @@ from .index import IndexDB
 from .llm import make_llm_client
 from .metadata import collect
 from .models import FileEntry, LLMUsage, OperationResult, Plan
+from .folder_profile import analyze_folder_profile
 from .organizer import Organizer
 from .parser_cache import ParserCache
 from .parsers import extract_excerpt
@@ -121,12 +122,19 @@ def run(
     _check()
     entries = gather_entries(target_root, config, recursive, progress, cancel_check)
     _check()
+    folder_profile = analyze_folder_profile(target_root, entries, recursive=recursive)
+    if progress:
+        progress(
+            f"profile: {folder_profile.label} · 건강 점수 {folder_profile.health_score}/100 "
+            f"({folder_profile.health_level})",
+            0.055,
+        )
 
     # ------------------------------------------------------------------
-    # Mode resolution.  ``organize_mode`` was added when we split the
-    # legacy ``reclassify_mode`` boolean into a 3-state choice on the
-    # start screen.  Old configs may only have ``reclassify_mode``;
-    # treat that as the new "신규 분류" mode.
+    # Mode resolution.  The UI describes these as existing-folder handling
+    # choices: all folders rebuilt, existing folders kept, or only signed
+    # Folder1004 folders kept.  The persisted mode ids stay stable for
+    # backwards compatibility.
     # ------------------------------------------------------------------
     mode = (getattr(config, "organize_mode", "") or "").lower()
     if mode not in ("new", "incremental", "additive"):
@@ -135,55 +143,55 @@ def run(
 
     seed_categories: list[dict] = []
     if mode == "incremental":
-        # 재분류 — 기존 최상위 폴더 *전체* 를 카테고리로 활용.
+        # 기존 폴더 유지하기 — 기존 최상위 폴더 *전체* 를 카테고리로 활용.
         seed_categories = _seed_categories_from_disk(target_root, fa_only=False)
         if progress:
             progress(
-                f"plan: 재분류 모드 — 기존 폴더 {len(seed_categories)}개를 카테고리로 활용",
+                f"plan: 기존 폴더 유지하기 — 기존 폴더 {len(seed_categories)}개를 카테고리로 활용",
                 0.06,
             )
     elif mode == "additive":
-        # 추가 분류 — Folder1004 가 만들어준 폴더만 카테고리로 활용.
+        # Folder1004로 이미 생성한 폴더만 유지하기 — Folder1004가 만들어준 폴더만 카테고리로 활용.
         # 그 안의 파일들은 이미 분류된 것으로 간주, 재분류 안 함.
-        # 외부에 떨어진 새 파일들만 FA 폴더(혹은 신규 폴더)로 보냄.
+        # 외부에 떨어진 새 파일들만 Folder1004 폴더(혹은 신규 폴더)로 보냄.
         seed_categories = _seed_categories_from_disk(target_root, fa_only=True)
         from .organizer import is_folder1004_folder_name
-        fa_paths: list[Path] = []
+        folder1004_paths: list[Path] = []
         if target_root.is_dir():
             for d in target_root.iterdir():
                 if d.is_dir() and is_folder1004_folder_name(d.name):
-                    fa_paths.append(d.resolve())
-        # Drop any entry whose absolute path lies inside an FA folder.
-        if fa_paths:
+                    folder1004_paths.append(d.resolve())
+        # Drop any entry whose absolute path lies inside a Folder1004 folder.
+        if folder1004_paths:
             kept: list[FileEntry] = []
-            skipped_in_fa = 0
+            skipped_in_folder1004 = 0
             for e in entries:
                 try:
                     rp = Path(e.path).resolve()
                 except OSError:
                     rp = Path(e.path)
-                # Use string-prefix match — a child of an FA dir starts
+                # Use string-prefix match — a child of a tagged dir starts
                 # with its directory + os.sep.
                 if any(
-                    str(rp).startswith(str(fa) + ("/" if "/" in str(fa) else "\\"))
-                    or str(rp) == str(fa)
-                    for fa in fa_paths
+                    str(rp).startswith(str(folder1004) + ("/" if "/" in str(folder1004) else "\\"))
+                    or str(rp) == str(folder1004)
+                    for folder1004 in folder1004_paths
                 ):
-                    skipped_in_fa += 1
+                    skipped_in_folder1004 += 1
                     continue
                 kept.append(e)
             entries = kept
             if progress:
                 progress(
-                    f"plan: 추가 분류 — 기존 FA 폴더 {len(fa_paths)}개 / "
-                    f"이미 분류된 파일 {skipped_in_fa}개 건너뜀 / "
+                    f"plan: Folder1004로 이미 생성한 폴더만 유지하기 — 기존 Folder1004 폴더 {len(folder1004_paths)}개 / "
+                    f"이미 분류된 파일 {skipped_in_folder1004}개 건너뜀 / "
                     f"새 분류 대상 {len(entries)}개",
                     0.06,
                 )
         else:
             if progress:
                 progress(
-                    "plan: 추가 분류 — FA 시그니처 폴더가 없어 신규 분류처럼 동작",
+                    "plan: Folder1004로 이미 생성한 폴더만 유지하기 — Folder1004 시그니처 폴더가 없어 신규 분류처럼 동작",
                     0.06,
                 )
 
@@ -282,7 +290,7 @@ def run(
         canon_cat: dict[str, str] = {
             str(a.file_path): a.primary_category_id for a in plan.assignments
         }
-        from .models import Assignment, SecondaryAssignment
+        from .models import Assignment
         for g in dedup_groups:
             cid = canon_cat.get(str(g.canonical.path))
             if not cid:
@@ -339,6 +347,8 @@ def run(
     else:
         op.llm_usage = LLMUsage(model="mock")
 
+    op.folder_profile = folder_profile
+
     # Write the markdown report FIRST so its path is available to
     # ``record_operation`` for storage in stats_json — that lets the
     # History tab open the report on double-click without globbing.
@@ -362,16 +372,16 @@ def _seed_categories_from_disk(
     """Build a seed catalogue from the existing top-level folders of
     ``target_root``.
 
-    ``fa_only=False`` (재분류): every readable sub-folder becomes a
+    ``fa_only=False`` (기존 폴더 유지하기): every readable sub-folder becomes a
     seed category — convenient when the user has manually curated the
     layout and only wants the LLM to place new files into existing
     bins.
 
-    ``fa_only=True`` (추가 분류): only folders whose name carries the
-    ``[FA·xxxxxx]`` signature added by :func:`folder_signature` are
-    used.  Anything the user (or another tool) made by hand is left
-    out of the catalogue and its contents will be re-evaluated as
-    loose files.
+    ``fa_only=True`` (Folder1004로 이미 생성한 폴더만 유지하기): only folders whose name carries the
+    ``[Folder1004·xxxxxx]`` signature added by :func:`folder_signature`
+    are used.  Legacy ``[FA·xxxxxx]`` tags are also accepted. Anything
+    the user (or another tool) made by hand is left out of the catalogue
+    and its contents will be re-evaluated as loose files.
     """
     import re
     from .organizer import (
@@ -405,7 +415,7 @@ def _seed_categories_from_disk(
         slug = re.sub(r"[^A-Za-z0-9가-힣]+", "-", core).strip("-").lower()[:40]
         if not slug:
             slug = f"existing-{len(seeds)+1}"
-        # If we recovered a FA signature, prefer it as the slug suffix
+        # If we recovered a Folder1004 signature, prefer it as the slug suffix
         # so a future signature() call regenerates the same tag and
         # the folder is reused on disk instead of being created anew.
         if sig:
@@ -420,5 +430,3 @@ def _seed_categories_from_disk(
             "_existing_folder": str(entry),
         })
     return seeds
-
-    return op

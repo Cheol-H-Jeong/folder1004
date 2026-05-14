@@ -101,36 +101,38 @@ _TIME_SUFFIX_RE = re.compile(r"\s*\([^()]+\)\s*$")
 def folder_signature(cat_id: str) -> str:
     """Short stable tag appended to every folder1004-created folder
     so we can later detect *exactly* which folders we made — used by
-    the additive-classify mode to leave existing FA folders untouched
+    the additive-classify mode to leave existing Folder1004 folders untouched
     and only sort *new* loose files into them.
 
-    Format: ``[FA·xxxxxx]`` — 6 hex chars from BLAKE2b of the
+    Format: ``[Folder1004·xxxxxx]`` — 6 hex chars from BLAKE2b of the
     category id, deterministic across runs (same plan → same tag).
     """
     import hashlib
     h = hashlib.blake2b((cat_id or "").encode("utf-8"), digest_size=4).hexdigest()
-    return f"[FA·{h[:6]}]"
+    return f"[Folder1004·{h[:6]}]"
 
 
-_FA_TAG_RE = re.compile(r"\[FA·([a-f0-9]{4,12})\]\s*$")
+_FOLDER1004_TAG_RE = re.compile(r"\[(?:Folder1004|FA)·([a-f0-9]{4,12})\]\s*$")
 
 
 def is_folder1004_folder_name(name: str) -> bool:
     """Whether *name* looks like a folder we previously created."""
-    return bool(_FA_TAG_RE.search(name or ""))
+    return bool(_FOLDER1004_TAG_RE.search(name or ""))
 
 
 def parse_fa_folder_name(name: str) -> Optional[dict]:
     """Return ``{"clean_name", "period", "signature"}`` for a name
-    that ends with the FA tag, else ``None``.
+    that ends with a Folder1004 tag, else ``None``.
 
     ``clean_name`` is the human-readable label with the leading group
-    prefix and the trailing FA tag stripped — it's what the planner
-    feeds back to the LLM as the category name.
+    prefix and the trailing Folder1004 tag stripped — it's what the
+    planner feeds back to the LLM as the category name.  Legacy
+    ``[FA·xxxxxx]`` tags are still accepted for folders created before
+    the project rename.
     """
     if not name:
         return None
-    m = _FA_TAG_RE.search(name)
+    m = _FOLDER1004_TAG_RE.search(name)
     if not m:
         return None
     sig = m.group(1)
@@ -184,8 +186,8 @@ def compose_folder_name(cat: Category, fallback_group: int = 9) -> str:
             pieces.append(f"〈{label}〉")
         else:
             pieces.append(f"({label})")
-    # Sanitiser runs before the FA tag is appended — its anti-JSON
-    # filter would otherwise strip the trailing ``]`` of ``[FA·xxx]``
+    # Sanitiser runs before the Folder1004 tag is appended — its anti-JSON
+    # filter would otherwise strip the trailing ``]`` of ``[Folder1004·xxx]``
     # because that bracket pattern looks like a stray JSON token.
     base = sanitize_folder_name(" ".join(pieces))
     sig = folder_signature(cat.id or cat.name or "")
@@ -212,7 +214,7 @@ def _normalize_for_match(folder_name: str) -> str:
     """
     s = folder_name.strip()
     s = _GROUP_PREFIX_RE.sub("", s)
-    s = _FA_TAG_RE.sub("", s).strip()
+    s = _FOLDER1004_TAG_RE.sub("", s).strip()
     s = _TIME_SUFFIX_RE.sub("", s).strip()
     s = re.sub(r"\s+", " ", s)
     return s.casefold()
@@ -424,6 +426,11 @@ class Organizer:
         # *renamed* to the canonical "N. name (period)" pattern so the
         # whole target root ends up with consistent folder naming.
         existing_dirs = self._list_existing_dirs(target_root)
+        protected_existing_dirs = {
+            Path(c.existing_folder).resolve()
+            for c in ordered
+            if getattr(c, "existing_folder", "")
+        }
 
         dir_for: dict[str, Path] = {}
         used_paths: set[Path] = set()
@@ -433,14 +440,18 @@ class Organizer:
             cat_core = _normalize_for_match(canonical)
 
             chosen: Optional[Path] = None
+            exact_existing = Path(cat.existing_folder).resolve() if cat.existing_folder else None
+            if exact_existing is not None and exact_existing.exists() and exact_existing.is_dir():
+                chosen = exact_existing
             best_score = 0.0
-            for d in existing_dirs:
-                if d in used_paths:
-                    continue
-                score = _fuzzy_match_score(_normalize_for_match(d.name), cat_core)
-                if score >= 0.85 and score > best_score:
-                    chosen = d
-                    best_score = score
+            if chosen is None:
+                for d in existing_dirs:
+                    if d in used_paths:
+                        continue
+                    score = _fuzzy_match_score(_normalize_for_match(d.name), cat_core)
+                    if score >= 0.85 and score > best_score:
+                        chosen = d
+                        best_score = score
             if chosen is None:
                 # No existing folder with the same core name — pick the
                 # canonical path, deduping if necessary.
@@ -453,9 +464,15 @@ class Organizer:
                     counter += 1
                 chosen = target_path
             else:
-                # Rename the existing folder to the canonical form so the
-                # whole target root follows one naming convention.
-                if chosen.name != canonical and not canonical_path.exists():
+                # Rename fuzzy-matched folders to the canonical form only in
+                # the rebuild/new path.  Preserve-mode seed categories carry
+                # ``existing_folder`` and Folder1004-signed folders must stay
+                # exact so we never create same-name/different-signature siblings.
+                can_rename_existing = (
+                    exact_existing is None
+                    and not is_folder1004_folder_name(chosen.name)
+                )
+                if can_rename_existing and chosen.name != canonical and not canonical_path.exists():
                     if not dry_run:
                         try:
                             chosen.rename(canonical_path)
@@ -618,14 +635,14 @@ class Organizer:
             # those are folders the LLM never even touched.
             if progress:
                 progress("organize: 폴더명 일관성 정리", 0.985)
-            self._renumber_unnumbered(target_root)
+            self._renumber_unnumbered(target_root, protected=protected_existing_dirs)
 
             # Empty-folder cleanup: any subdirectory under the target root
             # that is now empty (whether we created it or it pre-existed)
             # gets removed so the result is tidy.
             if progress:
                 progress("organize: 빈 폴더 정리", 0.99)
-            self._sweep_empty_dirs(target_root)
+            self._sweep_empty_dirs(target_root, protected=protected_existing_dirs)
 
         finished_at = datetime.now().astimezone()
         return OperationResult(
@@ -651,7 +668,7 @@ class Organizer:
         return out
 
     # -----------------------------------------------------------------
-    def _renumber_unnumbered(self, root: Path) -> None:
+    def _renumber_unnumbered(self, root: Path, protected: Optional[set[Path]] = None) -> None:
         """Force every direct child folder to start with ``"N. "``.
 
         Folders that already match ``_GROUP_PREFIX_RE`` are left alone.
@@ -660,6 +677,7 @@ class Organizer:
         """
         from .llm.client import _looks_like_mojibake
 
+        protected = {p.resolve() for p in (protected or set())}
         try:
             entries = list(os.scandir(root))
         except FileNotFoundError:
@@ -668,6 +686,11 @@ class Organizer:
             if not entry.is_dir(follow_symlinks=False):
                 continue
             current = Path(entry.path)
+            try:
+                if current.resolve() in protected:
+                    continue
+            except OSError:
+                pass
 
             # Stripping any "{N}." prefix first so the inspection looks at
             # the actual descriptive part of the folder name.
@@ -742,12 +765,13 @@ class Organizer:
         log.info("merged mojibake folder %s contents into %s", current, misc)
 
     # -----------------------------------------------------------------
-    def _sweep_empty_dirs(self, root: Path) -> None:
+    def _sweep_empty_dirs(self, root: Path, protected: Optional[set[Path]] = None) -> None:
         """Remove empty subdirectories under *root*, depth-first.
 
         Only directories are touched; the root itself is preserved.  We sort
         deepest-first so that nested empty trees collapse correctly.
         """
+        protected = {p.resolve() for p in (protected or set())}
         try:
             all_dirs = [Path(d) for d in _walk_dirs(root)]
         except FileNotFoundError:
@@ -755,6 +779,11 @@ class Organizer:
         for d in sorted(all_dirs, key=lambda p: len(p.parts), reverse=True):
             if d == root:
                 continue
+            try:
+                if d.resolve() in protected:
+                    continue
+            except OSError:
+                pass
             try:
                 if d.is_dir() and not any(d.iterdir()):
                     d.rmdir()

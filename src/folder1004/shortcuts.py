@@ -26,6 +26,7 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 log = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ def create_shortcut(target: Path, link_dir: Path, base_name: str | None = None) 
         # Final fallback — .url file points at the file URI.
         url_file = _unique(link_dir / f"{base}.url")
         url_file.write_text(
-            "[InternetShortcut]\nURL=file:///{}\n".format(str(target).replace("\\", "/")),
+            f"[InternetShortcut]\nURL={_windows_file_url(target)}\n",
             encoding="utf-8",
         )
         return url_file
@@ -231,7 +232,6 @@ def _write_desktop_application(path: Path, target: Path) -> None:
 def _create_lnk(target: Path, lnk: Path) -> bool:
     """Try pywin32 first, then PowerShell.  Returns True if successful."""
     try:
-        import pythoncom  # type: ignore
         from win32com.client import Dispatch  # type: ignore
 
         shell = Dispatch("WScript.Shell")
@@ -245,13 +245,7 @@ def _create_lnk(target: Path, lnk: Path) -> bool:
         log.debug("pywin32 lnk creation failed: %s", exc)
 
     # PowerShell fallback
-    ps_cmd = (
-        "$WshShell = New-Object -ComObject WScript.Shell; "
-        f"$s = $WshShell.CreateShortcut('{lnk}'); "
-        f"$s.TargetPath = '{target}'; "
-        f"$s.WorkingDirectory = '{target.parent}'; "
-        "$s.Save()"
-    )
+    ps_cmd = _build_lnk_powershell_command(target, lnk)
     try:
         subprocess.run(
             ["powershell", "-NoProfile", "-Command", ps_cmd],
@@ -264,3 +258,23 @@ def _create_lnk(target: Path, lnk: Path) -> bool:
     except Exception as exc:  # pragma: no cover
         log.warning("powershell lnk fallback failed: %s", exc)
         return False
+
+
+def _powershell_single_quoted(value: str | Path) -> str:
+    """Return a PowerShell single-quoted literal for an arbitrary path."""
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _build_lnk_powershell_command(target: Path, lnk: Path) -> str:
+    return (
+        "$WshShell = New-Object -ComObject WScript.Shell; "
+        f"$s = $WshShell.CreateShortcut({_powershell_single_quoted(lnk)}); "
+        f"$s.TargetPath = {_powershell_single_quoted(target)}; "
+        f"$s.WorkingDirectory = {_powershell_single_quoted(target.parent)}; "
+        "$s.Save()"
+    )
+
+
+def _windows_file_url(target: str | Path) -> str:
+    normalized = str(target).replace("\\", "/")
+    return "file:///" + quote(normalized, safe="/:")

@@ -97,6 +97,12 @@ QPushButton#Ghost {
     padding: 8px 14px;
 }
 QPushButton#Ghost:hover { background: rgba(0,0,0,0.05); }
+QPushButton#Ghost:checked {
+    background: #e5f1ff;
+    border: 1px solid #0071e3;
+    color: #0071e3;
+    font-weight: 700;
+}
 
 QPushButton#Warning {
     background: #ff9500;
@@ -155,6 +161,30 @@ QLabel#BadgeWarn {
     padding: 2px 10px;
     font-weight: 600;
 }
+
+QPushButton#PresetTag {
+    background: #ffffff;
+    border: 1px solid #d2d2d7;
+    border-radius: 14px;
+    padding: 6px 14px;
+    color: #1d1d1f;
+    font-size: 13px;
+}
+QPushButton#PresetTag:hover {
+    background: #f0f0f3;
+    border-color: #b8b8be;
+}
+QPushButton#PresetTag:checked {
+    background: #0071e3;
+    border: 1px solid #0071e3;
+    color: #ffffff;
+    font-weight: 700;
+}
+QPushButton#PresetTag:checked:hover {
+    background: #0077ed;
+    border-color: #0077ed;
+}
+QPushButton#PresetTag:focus { outline: none; }
 
 QTextEdit {
     background: #ffffff;
@@ -217,6 +247,13 @@ QPushButton#Primary:hover { background: #1a8fff; }
 QPushButton#Primary:disabled { background: #294b74; border-color: #294b74; }
 
 QPushButton#Ghost { background: transparent; border: 1px solid #3a3a3d; }
+QPushButton#Ghost:hover { background: #34343a; }
+QPushButton#Ghost:checked {
+    background: #1e3a5a;
+    border: 1px solid #0a84ff;
+    color: #64b5ff;
+    font-weight: 700;
+}
 
 QProgressBar {
     background: #2c2c30; border: none; border-radius: 6px; height: 8px;
@@ -235,6 +272,30 @@ QHeaderView::section {
 }
 
 QStatusBar { background: #232326; color: #a1a1a6; }
+
+QPushButton#PresetTag {
+    background: #2c2c30;
+    border: 1px solid #3a3a3d;
+    border-radius: 14px;
+    padding: 6px 14px;
+    color: #f2f2f7;
+    font-size: 13px;
+}
+QPushButton#PresetTag:hover {
+    background: #34343a;
+    border-color: #4a4a50;
+}
+QPushButton#PresetTag:checked {
+    background: #0a84ff;
+    border: 1px solid #0a84ff;
+    color: #ffffff;
+    font-weight: 700;
+}
+QPushButton#PresetTag:checked:hover {
+    background: #1a8fff;
+    border-color: #1a8fff;
+}
+QPushButton#PresetTag:focus { outline: none; }
 
 QLabel#Badge { background: #1e3a5a; color: #64b5ff; border-radius: 10px; padding: 2px 10px; font-weight: 600; }
 QLabel#BadgeWarn { background: #4a3300; color: #ffb547; border-radius: 10px; padding: 2px 10px; font-weight: 600; }

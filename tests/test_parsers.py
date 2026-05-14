@@ -1,6 +1,4 @@
-import io
 import zipfile
-from pathlib import Path
 
 from folder1004.parsers import extract_excerpt
 

@@ -116,9 +116,7 @@ def test_report_includes_dedup_ledger(tmp_path):
     """The markdown report must list every duplicate that was deleted,
     along with its canonical and the bytes recovered — so the user can
     audit the dedup pass instead of trusting a single summary line."""
-    from folder1004.models import (
-        Category, MovedFile, OperationResult, LLMUsage,
-    )
+    from folder1004.models import Category, OperationResult, LLMUsage
     from folder1004.reporter import emit_markdown
     op = OperationResult(
         target_root=tmp_path,
@@ -150,9 +148,7 @@ def test_get_api_key_does_not_leak_gemini_to_openai_compat(tmp_path, monkeypatch
     legacy gemini_api_key slot's value, which is what caused 401s
     when users picked their local Qwen preset.
     """
-    from folder1004.config import (
-        Config, AppPaths, get_api_key, save_config,
-    )
+    from folder1004.config import Config, get_api_key
 
     # Force config-level fallback path (no real keyring).  We exercise
     # the slot logic by patching the keyring lookup to mimic 'only
@@ -216,6 +212,7 @@ def test_folder_signature_round_trip():
         time_label="2025-2026", duration="multi-year", group=2,
     )
     name = compose_folder_name(cat)
+    assert "[Folder1004·" in name
     assert is_folder1004_folder_name(name)
     parsed = parse_fa_folder_name(name)
     assert parsed is not None
@@ -225,20 +222,33 @@ def test_folder_signature_round_trip():
     assert parsed["signature"] in folder_signature("drug-ai")
 
 
-def test_folder_signature_reject_non_fa():
+def test_folder_signature_reject_non_folder1004():
     from folder1004.organizer import is_folder1004_folder_name, parse_fa_folder_name
     assert not is_folder1004_folder_name("1. 일반 폴더")
     assert not is_folder1004_folder_name("내가 손으로 만든 폴더")
     assert parse_fa_folder_name("foo (2024)") is None
 
 
+def test_legacy_fa_signature_still_parses():
+    from folder1004.organizer import is_folder1004_folder_name, parse_fa_folder_name
+
+    legacy = "1. 의약품 AI 심사 〈2025-2026〉 [FA·a3b9c1]"
+    assert is_folder1004_folder_name(legacy)
+    parsed = parse_fa_folder_name(legacy)
+    assert parsed == {
+        "clean_name": "의약품 AI 심사",
+        "period": "2025-2026",
+        "signature": "a3b9c1",
+    }
+
+
 def test_additive_mode_seeds_only_fa_folders(tmp_path):
-    """Additive mode's seed list must come from FA folders only —
+    """Additive mode's seed list must come from Folder1004 folders only —
     user-created plain folders are NOT used as categories (their
     contents will be reclassified as loose files)."""
     from folder1004.pipeline import _seed_categories_from_disk
-    # FA folder
-    (tmp_path / "1. 의약품 AI 심사 〈2025-2026〉 [FA·a3b9c1]").mkdir()
+    # Folder1004-created folder
+    (tmp_path / "1. 의약품 AI 심사 〈2025-2026〉 [Folder1004·a3b9c1]").mkdir()
     # User-created plain folder
     (tmp_path / "임시 작업 폴더").mkdir()
     (tmp_path / "2. 손으로 만든 (2025)").mkdir()
@@ -250,7 +260,7 @@ def test_additive_mode_seeds_only_fa_folders(tmp_path):
 
     assert fa_names == {"의약품 AI 심사"}
     assert all_names == {"의약품 AI 심사", "임시 작업 폴더", "손으로 만든"}
-    # FA seed retains its signature in the slug for stable reuse on
+    # Folder1004 seed retains its signature in the slug for stable reuse on
     # next compose_folder_name call.
     assert any(s["id"].endswith("-a3b9c1") for s in fa_only)
 
@@ -349,3 +359,36 @@ def test_generic_pdf_alone_does_not_force_match():
     assert score < 0.20, (
         f"generic .pdf overlap leaked student → drug-ai: {score:.3f}"
     )
+
+
+def test_seed_existing_folder_path_survives_plan_conversion(tmp_path):
+    from folder1004.planner import _plan_from_dict
+
+    existing = tmp_path / "계약서"
+    existing.mkdir()
+    f = tmp_path / "a.txt"
+    f.write_text("a")
+    entry = _entry(f, 1)
+    data = {
+        "categories": [
+            {
+                "id": "contracts",
+                "name": "계약서",
+                "group": 1,
+                "_existing_folder": str(existing),
+            }
+        ],
+        "assignments": [
+            {
+                "path": str(f),
+                "primary": "contracts",
+                "primary_score": 0.9,
+                "secondary": [],
+                "reason": "test",
+            }
+        ],
+    }
+
+    plan = _plan_from_dict(data, [entry])
+
+    assert plan.categories[0].existing_folder == str(existing)

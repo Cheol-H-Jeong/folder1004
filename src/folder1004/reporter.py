@@ -33,6 +33,18 @@ def _build(op: OperationResult) -> str:
         )
     if op.operation_id is not None:
         lines.append(f"- 오퍼레이션 ID: {op.operation_id}")
+    profile = getattr(op, "folder_profile", None)
+    if profile is not None:
+        presets = ", ".join(getattr(profile, "recommended_preset_names", []) or []) or "—"
+        lines.append(
+            f"- 폴더 프로필: {profile.label} "
+            f"(신뢰도 {profile.confidence:.0%})"
+        )
+        lines.append(
+            f"- 폴더 건강 점수: {profile.health_score}/100 "
+            f"({profile.health_level})"
+        )
+        lines.append(f"- 추천 분류 스타일: {presets}")
     if op.llm_usage is not None:
         u = op.llm_usage
         if u.model == "mock" or u.request_count == 0:
@@ -56,6 +68,29 @@ def _build(op: OperationResult) -> str:
                 f"— 공개 단가 기반의 대략 평균치이며 실제 청구액은 다를 수 있습니다."
             )
     lines.append("")
+
+    if profile is not None:
+        lines.append("## 폴더 프로필 / 건강 진단")
+        lines.append("")
+        signals = getattr(profile, "matched_signals", []) or []
+        reasons = getattr(profile, "health_reasons", []) or []
+        if signals:
+            lines.append("**프로필 판단 근거**")
+            lines.extend(f"- {item}" for item in signals)
+            lines.append("")
+        if reasons:
+            lines.append("**건강 점수 근거**")
+            lines.extend(f"- {item}" for item in reasons)
+            lines.append("")
+        ext_counts = getattr(profile, "extension_counts", {}) or {}
+        if ext_counts:
+            lines.append("**주요 확장자**")
+            lines.append("")
+            lines.append("| 확장자 | 파일 수 |")
+            lines.append("| --- | ---: |")
+            for ext, count in list(ext_counts.items())[:10]:
+                lines.append(f"| `{ext}` | {count} |")
+            lines.append("")
 
     # Per-call breakdown so the user can see *which* call was slow.
     if op.llm_usage is not None and op.llm_usage.calls:

@@ -3,11 +3,8 @@
 Run on every OS in CI; verify the platform-sensitive bits behave the
 same way on Linux, macOS, and Windows wherever possible.
 """
-import os
 import sys
-from pathlib import Path
 
-import pytest
 
 from folder1004.config import default_paths
 

@@ -15,6 +15,8 @@ from ..config import (
     save_config,
     set_api_key,
 )
+from ..folder_profile import analyze_folder_profile
+from ..metadata import collect
 from ..index import IndexDB
 from ..models import OperationResult
 from .widgets import Card, PathDropBar, StageIndicator, StatsRow
@@ -64,6 +66,86 @@ def _live_group(text: str) -> str:
     if cm:
         chunk = " " + cm.group(0)
     return (base + chunk)[:64] or "live"
+
+
+class FlowLayout(QtWidgets.QLayout):
+    """Wrap child widgets to the next line and report height-for-width.
+
+    Used for preset tag chips so they never require scrollbars and never
+    overlap the custom instruction textbox below.
+    """
+
+    def __init__(self, parent=None, margin: int = 0, hspacing: int = 8, vspacing: int = 8):
+        super().__init__(parent)
+        self.setContentsMargins(margin, margin, margin, margin)
+        self._hspace = hspacing
+        self._vspace = vspacing
+        self._items: list[QtWidgets.QLayoutItem] = []
+
+    def __del__(self):
+        while self.count():
+            self.takeAt(0)
+
+    def addItem(self, item: QtWidgets.QLayoutItem) -> None:
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int) -> QtWidgets.QLayoutItem | None:
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index: int) -> QtWidgets.QLayoutItem | None:
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self) -> QtCore.Qt.Orientations:
+        return QtCore.Qt.Orientations(QtCore.Qt.Orientation(0))
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._do_layout(QtCore.QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect: QtCore.QRect) -> None:
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self) -> QtCore.QSize:
+        return self.minimumSize()
+
+    def minimumSize(self) -> QtCore.QSize:
+        size = QtCore.QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        size += QtCore.QSize(
+            margins.left() + margins.right(),
+            margins.top() + margins.bottom(),
+        )
+        return size
+
+    def _do_layout(self, rect: QtCore.QRect, *, test_only: bool) -> int:
+        margins = self.contentsMargins()
+        effective = rect.adjusted(
+            margins.left(), margins.top(), -margins.right(), -margins.bottom()
+        )
+        x = effective.x()
+        y = effective.y()
+        line_height = 0
+        for item in self._items:
+            hint = item.sizeHint()
+            next_x = x + hint.width() + self._hspace
+            if next_x - self._hspace > effective.right() and line_height > 0:
+                x = effective.x()
+                y += line_height + self._vspace
+                next_x = x + hint.width() + self._hspace
+                line_height = 0
+            if not test_only:
+                item.setGeometry(QtCore.QRect(QtCore.QPoint(x, y), hint))
+            x = next_x
+            line_height = max(line_height, hint.height())
+        return y + line_height - rect.y() + margins.bottom()
 
 
 class ToastDialog(QtWidgets.QDialog):
@@ -172,7 +254,18 @@ class OrganizeView(QtWidgets.QWidget):
         self._build()
 
     def _build(self):
-        outer = QtWidgets.QVBoxLayout(self)
+        root = QtWidgets.QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        self.scroll_area = QtWidgets.QScrollArea()
+        self.scroll_area.setObjectName("PageScroll")
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        root.addWidget(self.scroll_area)
+
+        content = QtWidgets.QWidget()
+        self.scroll_area.setWidget(content)
+        outer = QtWidgets.QVBoxLayout(content)
         outer.setContentsMargins(28, 28, 28, 20)
         outer.setSpacing(18)
 
@@ -209,32 +302,44 @@ class OrganizeView(QtWidgets.QWidget):
 
         self.chk_recursive = QtWidgets.QCheckBox("하위 폴더 포함")
         self.chk_recursive.setChecked(self.config.recursive_default)
-        self.chk_dry = QtWidgets.QCheckBox("Dry-Run (미리보기만)")
         opt_row.addWidget(self.chk_recursive)
-        opt_row.addWidget(self.chk_dry)
         opt_row.addStretch(1)
 
-        # 분류 모드 카드 — 신규 vs 재분류.  처음 정리할 때 / 추가
-        # 정리할 때를 시작 화면에서 명시적으로 고르게 한다.
+        # 폴더 처리 방식 카드 — 기존 폴더를 어떻게 다룰지만 고르게 한다.
+        # 내부 mode 값은 호환성을 위해 new/incremental/additive를 유지한다.
         mode_card = Card()
-        mc = QtWidgets.QHBoxLayout(mode_card)
+        mc = QtWidgets.QVBoxLayout(mode_card)
         mc.setContentsMargins(18, 14, 18, 14)
-        mc.setSpacing(20)
-        mode_lbl = QtWidgets.QLabel("분류 모드")
+        mc.setSpacing(10)
+        mode_head = QtWidgets.QHBoxLayout()
+        mode_head.setSpacing(18)
+        mode_lbl = QtWidgets.QLabel("기존 폴더 처리")
+        mode_lbl.setObjectName("ModeTitle")
         mode_lbl.setStyleSheet("font-weight:600;")
-        mc.addWidget(mode_lbl)
-        self.rad_new = QtWidgets.QRadioButton("신규 분류")
+        mode_lbl.setMinimumWidth(112)
+        mode_hint = QtWidgets.QLabel("기본값 그대로 두면 Folder1004가 폴더 상태를 보고 알아서 판단해 정리합니다.")
+        mode_hint.setObjectName("ModeHint")
+        mode_hint.setWordWrap(True)
+        mode_hint.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+        mode_hint.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        mode_hint.setStyleSheet("color:#6e6e73;font-size:12px;")
+        mode_head.addWidget(mode_lbl)
+        mode_head.addWidget(mode_hint, 1)
+        mc.addLayout(mode_head)
+        mode_options_wrap = QtWidgets.QWidget()
+        mode_options = FlowLayout(mode_options_wrap, margin=0, hspacing=20, vspacing=8)
+        self.rad_new = QtWidgets.QRadioButton("모든 기존 폴더 갈아엎기")
         self.rad_new.setToolTip(
             "기존 하위 폴더를 무시하고 처음부터 폴더 체계를 새로 만듭니다.\n"
             "처음 정리하는 폴더에 사용하세요."
         )
-        self.rad_inc = QtWidgets.QRadioButton("재분류 (기존 폴더 활용)")
+        self.rad_inc = QtWidgets.QRadioButton("기존 폴더 유지하기")
         self.rad_inc.setToolTip(
             "기존 최상위 폴더를 카테고리 목록으로 사용하고 모든 파일을\n"
             "다시 분류합니다. 손으로 정리한 폴더 체계는 유지하면서 안의\n"
             "내용을 한 번 더 다듬을 때 사용하세요."
         )
-        self.rad_add = QtWidgets.QRadioButton("추가 분류 (FA 폴더 보존)")
+        self.rad_add = QtWidgets.QRadioButton("Folder1004로 이미 생성한 폴더만 유지하기")
         self.rad_add.setToolTip(
             "Folder1004 가 만든 폴더는 그대로 두고, 새로 부어 넣은\n"
             "파일만 그 폴더들에 추가하거나 필요시 새 폴더를 만듭니다.\n"
@@ -244,6 +349,7 @@ class OrganizeView(QtWidgets.QWidget):
         self.rad_new.setChecked(current_mode == "new")
         self.rad_inc.setChecked(current_mode == "incremental")
         self.rad_add.setChecked(current_mode == "additive")
+        self.rad_new.setText("모든 기존 폴더 갈아엎기 (자동 판단 기본값)")
         # Default to "new" if nothing matched.
         if not (self.rad_new.isChecked() or self.rad_inc.isChecked() or self.rad_add.isChecked()):
             self.rad_new.setChecked(True)
@@ -251,11 +357,74 @@ class OrganizeView(QtWidgets.QWidget):
         mode_grp.addButton(self.rad_new)
         mode_grp.addButton(self.rad_inc)
         mode_grp.addButton(self.rad_add)
-        mc.addWidget(self.rad_new)
-        mc.addWidget(self.rad_inc)
-        mc.addWidget(self.rad_add)
-        mc.addStretch(1)
+        mode_options.addWidget(self.rad_new)
+        mode_options.addWidget(self.rad_inc)
+        mode_options.addWidget(self.rad_add)
+        mc.addWidget(mode_options_wrap)
         outer.addWidget(mode_card)
+
+        style_card = Card()
+        sc = QtWidgets.QVBoxLayout(style_card)
+        sc.setContentsMargins(18, 16, 18, 16)
+        sc.setSpacing(10)
+        style_title = QtWidgets.QLabel("추천 분류 스타일")
+        style_title.setStyleSheet("font-size:16px;font-weight:600;")
+        sc.addWidget(style_title)
+        style_sub = QtWidgets.QLabel(
+            "폴더를 고르면 Folder1004가 정리 방향을 추천해 자동으로 켭니다. "
+            "프리셋의 실제 프롬프트는 숨기고, 필요한 추가 요청만 직접 적으세요."
+        )
+        style_sub.setWordWrap(True)
+        style_sub.setStyleSheet("color:#6e6e73;font-size:12px;")
+        sc.addWidget(style_sub)
+
+        self.lbl_classification_recommendation = QtWidgets.QLabel("폴더를 선택하면 추천 스타일이 자동으로 적용됩니다.")
+        self.lbl_classification_recommendation.setWordWrap(True)
+        self.lbl_classification_recommendation.setStyleSheet("color:#0a8a3a;font-size:12px;font-weight:600;")
+        sc.addWidget(self.lbl_classification_recommendation)
+
+        preset_wrap = QtWidgets.QWidget()
+        preset_wrap.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Preferred,
+        )
+        preset_flow = FlowLayout(preset_wrap, margin=0, hspacing=8, vspacing=8)
+        self.classification_preset_buttons: dict[str, QtWidgets.QPushButton] = {}
+        selected_presets = set(getattr(self.config, "classification_guidance_preset_names", []) or [])
+        for preset in CLASSIFICATION_GUIDANCE_PRESETS:
+            label = str(preset.get("label") or "").strip()
+            if not label:
+                continue
+            btn = QtWidgets.QPushButton(label)
+            btn.setObjectName("PresetTag")
+            btn.setCheckable(True)
+            btn.setProperty("preset_label", label)
+            btn.setChecked(label in selected_presets)
+            btn.setCursor(QtCore.Qt.PointingHandCursor)
+            btn.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
+            btn.toggled.connect(self._sync_classification_guidance_config)
+            self.classification_preset_buttons[label] = btn
+            preset_flow.addWidget(btn)
+        preset_wrap.setMinimumHeight(160)
+        sc.addWidget(preset_wrap)
+
+        self.edit_custom_classification_guidance = QtWidgets.QTextEdit()
+        self.edit_custom_classification_guidance.setAcceptRichText(False)
+        self.edit_custom_classification_guidance.setMinimumHeight(72)
+        self.edit_custom_classification_guidance.setPlaceholderText(
+            "추가로 원하는 점만 입력하세요. 예: 고객명과 촬영일을 특히 우선해줘."
+        )
+        self.edit_custom_classification_guidance.setPlainText(
+            (getattr(self.config, "classification_guidance", "") or "").strip()
+        )
+        self.edit_custom_classification_guidance.textChanged.connect(
+            self._sync_classification_guidance_config
+        )
+        sc.addWidget(self.edit_custom_classification_guidance)
+
+        outer.addWidget(style_card)
+        self.path_bar.path_changed.connect(self._recommend_classification_style)
+        self._sync_classification_guidance_config()
 
         self.badge_api = QtWidgets.QLabel("API 키 확인 중…")
         self.badge_api.setObjectName("Badge")
@@ -349,6 +518,63 @@ class OrganizeView(QtWidgets.QWidget):
         self.refresh_api_badge()
 
     # ------------------------------------------------------------------
+    def _selected_classification_preset_names(self) -> list[str]:
+        buttons = getattr(self, "classification_preset_buttons", {})
+        return [label for label, btn in buttons.items() if btn.isChecked()]
+
+    def _sync_classification_guidance_config(self) -> None:
+        if not hasattr(self, "edit_custom_classification_guidance"):
+            return
+        self.config.classification_guidance = (
+            self.edit_custom_classification_guidance.toPlainText().strip()
+        )
+        self.config.classification_guidance_preset_names = (
+            self._selected_classification_preset_names()
+        )
+
+    def _set_classification_presets(self, labels: list[str]) -> None:
+        wanted = set(labels)
+        for label, btn in getattr(self, "classification_preset_buttons", {}).items():
+            btn.blockSignals(True)
+            btn.setChecked(label in wanted)
+            btn.blockSignals(False)
+        self._sync_classification_guidance_config()
+
+    def _recommend_classification_style(self, path_text: str) -> None:
+        path = Path(path_text) if path_text else None
+        labels, reason = self._classification_style_recommendation(path)
+        if labels:
+            self._set_classification_presets(labels)
+            self.lbl_classification_recommendation.setText(
+                f"추천 적용: {', '.join(labels)} · {reason}"
+            )
+        else:
+            self.lbl_classification_recommendation.setText(
+                "폴더를 선택하면 추천 스타일이 자동으로 적용됩니다."
+            )
+
+    def _classification_style_recommendation(self, path: Path | None) -> tuple[list[str], str]:
+        if path is None or not path.exists():
+            return [], ""
+        entries = []
+        try:
+            for child in list(path.iterdir())[:80]:
+                if child.is_file() and not child.is_symlink():
+                    try:
+                        entries.append(collect(child))
+                    except OSError:
+                        continue
+        except OSError:
+            pass
+        summary = analyze_folder_profile(path, entries, recursive=False)
+        reason = (
+            f"{summary.label} · 건강 점수 {summary.health_score}/100"
+            if summary.file_count
+            else "일반 폴더에는 안전한 기본 스타일을 사용해요"
+        )
+        return summary.recommended_preset_names, reason
+
+    # ------------------------------------------------------------------
     def refresh_api_badge(self):
         from ..config import provider_label
 
@@ -370,6 +596,11 @@ class OrganizeView(QtWidgets.QWidget):
         if not Path(path).is_dir():
             QtWidgets.QMessageBox.warning(self, "폴더 아님", "선택한 경로가 폴더가 아닙니다.")
             return
+        self._sync_classification_guidance_config()
+        try:
+            save_config(self.config)
+        except Exception:
+            pass
         self.set_running(True)
         if self.rad_add.isChecked():
             mode = "additive"
@@ -379,7 +610,7 @@ class OrganizeView(QtWidgets.QWidget):
             mode = "new"
         self.start_requested.emit(
             path, self.chk_recursive.isChecked(),
-            self.chk_dry.isChecked(), mode,
+            False, mode,
         )
 
     def set_running(self, running: bool):
@@ -808,13 +1039,24 @@ class SettingsView(QtWidgets.QWidget):
     def __init__(self, config: Config, parent=None):
         super().__init__(parent)
         self.config = config
-        v = QtWidgets.QVBoxLayout(self)
+        root = QtWidgets.QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        self.scroll_area = QtWidgets.QScrollArea()
+        self.scroll_area.setObjectName("PageScroll")
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        root.addWidget(self.scroll_area)
+
+        content = QtWidgets.QWidget()
+        self.scroll_area.setWidget(content)
+        v = QtWidgets.QVBoxLayout(content)
         v.setContentsMargins(28, 28, 28, 20)
         v.setSpacing(14)
 
         t = QtWidgets.QLabel("설정")
         t.setObjectName("Title")
-        sub = QtWidgets.QLabel("LLM 연결과 분류 동작을 조정합니다. 변경 후 '설정 저장'을 누르면 적용됩니다.")
+        sub = QtWidgets.QLabel("LLM 연결과 앱 동작을 조정합니다. 분류 스타일은 폴더 정리 화면에서 폴더별로 추천됩니다.")
         sub.setObjectName("Subtitle")
         v.addWidget(t)
         v.addWidget(sub)
@@ -941,66 +1183,13 @@ class SettingsView(QtWidgets.QWidget):
         v.addWidget(conn_card)
 
         # ────────────────────────────────────────────────────────────
-        # Card 2 — 사용자 분류 원칙
-        # LLM에게 전달할 자연어 정리 방향. 프리셋 버튼은 타이핑을
-        # 대신해 자주 쓰는 원칙을 한 번에 채워 넣는다.
-        # ────────────────────────────────────────────────────────────
-        guide_card = Card()
-        c2 = QtWidgets.QVBoxLayout(guide_card)
-        c2.setContentsMargins(18, 16, 18, 16)
-        c2.setSpacing(10)
-        c2_title = QtWidgets.QLabel("분류 원칙")
-        c2_title.setStyleSheet("font-size:16px;font-weight:600;")
-        c2.addWidget(c2_title)
-        c2_sub = QtWidgets.QLabel(
-            "원하는 정리 방향을 자연어로 적어두면 모든 LLM 분류 요청에 함께 전달됩니다. "
-            "아래 프리셋을 누르면 타이핑 없이 원칙을 추가할 수 있습니다."
-        )
-        c2_sub.setWordWrap(True)
-        c2_sub.setStyleSheet("color:#6e6e73;font-size:12px;")
-        c2.addWidget(c2_sub)
-
-        self.edit_classification_guidance = QtWidgets.QTextEdit()
-        self.edit_classification_guidance.setAcceptRichText(False)
-        self.edit_classification_guidance.setMinimumHeight(96)
-        self.edit_classification_guidance.setPlaceholderText(
-            "예: 사진은 고객명과 촬영일을 우선하고, 계약·견적·정산 파일은 따로 모아줘. "
-            "확신이 낮은 파일은 검토 필요로 보내줘."
-        )
-        self.edit_classification_guidance.setPlainText(
-            (getattr(self.config, "classification_guidance", "") or "").strip()
-        )
-        c2.addWidget(self.edit_classification_guidance)
-
-        preset_grid = QtWidgets.QGridLayout()
-        preset_grid.setContentsMargins(0, 2, 0, 0)
-        preset_grid.setHorizontalSpacing(6)
-        preset_grid.setVerticalSpacing(6)
-        for i, preset in enumerate(CLASSIFICATION_GUIDANCE_PRESETS):
-            btn = QtWidgets.QPushButton(preset["label"])
-            btn.setObjectName("Ghost")
-            btn.setToolTip(preset["text"])
-            btn.clicked.connect(lambda _checked=False, p=preset: self._apply_guidance_preset(p))
-            preset_grid.addWidget(btn, i // 4, i % 4)
-        c2.addLayout(preset_grid)
-
-        guide_actions = QtWidgets.QHBoxLayout()
-        guide_actions.addStretch(1)
-        btn_clear_guidance = QtWidgets.QPushButton("분류 원칙 비우기")
-        btn_clear_guidance.setObjectName("Ghost")
-        btn_clear_guidance.clicked.connect(self._clear_guidance)
-        guide_actions.addWidget(btn_clear_guidance)
-        c2.addLayout(guide_actions)
-        v.addWidget(guide_card)
-
-        # ────────────────────────────────────────────────────────────
         # Card 3 — 분류 동작
         # 평소엔 LLM이 기존 폴더명을 단서로 활용해 사용자가 이미
         # 정리해 둔 구조를 존중합니다.  하지만 한번 잘못 분류된
-        # 하위 폴더 체계를 다시 입력해 *재분류*하려는 경우에는,
+        # 하위 폴더 체계를 다시 입력해 *기존 폴더 기준 정리*를 하려는 경우에는,
         # 그 폴더명이 오히려 잘못된 그룹을 그대로 잠가 버립니다.
         # 이 토글은 LLM에 보내는 경로에서 부모 폴더명을 익명화해
-        # 파일명 + 본문만으로 재분류하도록 강제합니다.
+        # 파일명 + 본문만으로 다시 판단하도록 강제합니다.
         # ────────────────────────────────────────────────────────────
         beh_card = Card()
         c3 = QtWidgets.QVBoxLayout(beh_card)
@@ -1010,7 +1199,7 @@ class SettingsView(QtWidgets.QWidget):
         c3_title.setStyleSheet("font-size:16px;font-weight:600;")
         c3.addWidget(c3_title)
 
-        # 신규 / 재분류 모드는 *시작 화면*에서 매번 선택합니다 — 여기엔
+        # 신규 / 기존 폴더 기준 모드는 *시작 화면*에서 매번 선택합니다 — 여기엔
         # 보조 옵션(중복 파일 dedup 임계값)만 둡니다.
         f3 = QtWidgets.QFormLayout()
         f3.setSpacing(8)
@@ -1212,25 +1401,6 @@ class SettingsView(QtWidgets.QWidget):
         self._refresh_status()
         self.config_changed.emit()
 
-    def _apply_guidance_preset(self, preset: dict) -> None:
-        label = str(preset.get("label") or "").strip()
-        text = str(preset.get("text") or "").strip()
-        if not text:
-            return
-        current = self.edit_classification_guidance.toPlainText().strip()
-        if text in current:
-            return
-        next_text = text if not current else f"{current}\n\n- {text}"
-        self.edit_classification_guidance.setPlainText(next_text)
-        names = list(getattr(self.config, "classification_guidance_preset_names", []) or [])
-        if label and label not in names:
-            names.append(label)
-        self.config.classification_guidance_preset_names = names
-
-    def _clear_guidance(self) -> None:
-        self.edit_classification_guidance.clear()
-        self.config.classification_guidance_preset_names = []
-
     # ------------------------------------------------------------------
     # Preset management
     # ------------------------------------------------------------------
@@ -1414,9 +1584,6 @@ class SettingsView(QtWidgets.QWidget):
         # here.  Keep the legacy reclassify_mode bool aligned with the
         # latest run so old code paths don't desync.
         self.config.dedup_min_bytes = int(self.spin_dedup_mb.value()) * (1 << 20)
-        self.config.classification_guidance = (
-            self.edit_classification_guidance.toPlainText().strip()
-        )
         self.config.appearance = self.cmb_appearance.currentText()
         # Reasoning mode is decided automatically from the model name in
         # OpenAICompatClient — no user knob.  Keep the saved value at

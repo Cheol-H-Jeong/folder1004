@@ -11,12 +11,17 @@ import logging
 import sys
 from pathlib import Path
 
+if __package__ in (None, ""):
+    if not getattr(sys, "frozen", False):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    __package__ = "folder1004"
+
 
 def _run_cli(args) -> int:
     from .config import default_paths, load_config
     from .index import IndexDB
     from .pipeline import run
-    from .runlog import current_log_path, start_session
+    from .runlog import start_session
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     log_path = start_session("cli")
