@@ -4,11 +4,13 @@
 #   pip install -e ".[dev,windows]"
 #   .\scripts\build_windows.ps1                # bundle only
 #   .\scripts\build_windows.ps1 -Installer     # bundle + .exe installer (requires Inno Setup 6 'iscc')
+#   .\scripts\build_windows.ps1 -Installer -RequireInstaller
 #
 # Code signing / SmartScreen reputation is OUT OF SCOPE.  The unsigned
 # bundle still runs locally; SmartScreen may warn on first run.
 param(
-    [switch]$Installer
+    [switch]$Installer,
+    [switch]$RequireInstaller
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -33,11 +35,34 @@ Write-Host "Run:          $bundle\folder1004.exe"
 if ($Installer) {
     $iscc = Get-Command iscc -ErrorAction SilentlyContinue
     if (-not $iscc) {
-        Write-Warning "Inno Setup 'iscc' not on PATH — skipping installer step."
-        Write-Warning "Install from https://jrsoftware.org/isdl.php and re-run."
+        $candidatePaths = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+        )
+        foreach ($candidate in $candidatePaths) {
+            if ($candidate -and (Test-Path $candidate)) {
+                $iscc = Get-Item $candidate
+                break
+            }
+        }
+    }
+    if (-not $iscc) {
+        $message = "Inno Setup 'iscc' not found — install Inno Setup 6 and re-run."
+        if ($RequireInstaller) {
+            Write-Error $message
+        }
+        Write-Warning "$message Skipping installer step."
         exit 0
     }
-    iscc "$root\scripts\folder1004.iss"
+    $isccPath = $iscc.Source
+    if (-not $isccPath) {
+        $isccPath = $iscc.FullName
+    }
+    & $isccPath "$root\scripts\folder1004.iss"
+    $installer = "$root\dist\Folder1004-Setup.exe"
+    if (-not (Test-Path $installer)) {
+        Write-Error "Installer build did not produce $installer"
+    }
     Write-Host ""
-    Write-Host "Installer: $root\dist\Folder1004-Setup.exe"
+    Write-Host "Installer: $installer"
 }

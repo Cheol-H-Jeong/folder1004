@@ -57,16 +57,18 @@ archives.
 
 Grab a release for your OS from the [Releases](https://github.com/Cheol-H-Jeong/folder1004/releases)
 page.  CI builds them on every tag (Linux bundle / macOS .app / Windows
-one-folder bundle):
+installer + one-folder bundle):
 
 - **Linux** — `folder1004-linux-…` archive, extract anywhere, run
   `./folder1004/folder1004`.  An AppImage build is also produced when
   `appimagetool` is on the build host.
 - **macOS** — open the `.app`.  First launch: right-click → Open
   (Gatekeeper warning; signing/notarisation is pending).
-- **Windows** — extract the bundle and run `folder1004.exe`, or use
-  the Inno-Setup `Folder1004-Setup.exe` if available.  SmartScreen
-  may warn on first launch (unsigned).
+- **Windows** — download `Folder1004-Setup.exe`, run it, then launch
+  **Folder1004** from the Start menu or optional desktop shortcut.
+  `Folder1004-Windows` is also published as a portable one-folder
+  bundle for users who prefer not to install.  SmartScreen may warn on
+  first launch because the installer is currently unsigned.
 
 ### From source (any OS, Python ≥ 3.11)
 
@@ -168,10 +170,13 @@ bash scripts/build_macos.sh dmg        # also build a .dmg via create-dmg
 
 # Windows (one-folder bundle in dist\folder1004\)
 .\scripts\build_windows.ps1
-.\scripts\build_windows.ps1 -Installer # also build Inno Setup .exe
+.\scripts\build_windows.ps1 -Installer # also build dist\Folder1004-Setup.exe
 ```
 
 Requires `pip install -e ".[dev]"` (Windows: add `,windows`).
+The Windows installer build also requires Inno Setup 6 (`iscc` on PATH,
+or installed in the default `Program Files` location).  CI installs Inno
+Setup automatically and uploads `Folder1004-Windows-Installer`.
 PyInstaller spec is shared across all three OSes
 (`scripts/folder1004.spec`).
 

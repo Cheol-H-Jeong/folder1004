@@ -8,6 +8,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   test:
     name: ${{ matrix.os }} • Python ${{ matrix.python-version }}
@@ -92,14 +95,18 @@ jobs:
           else
             pip install -e ".[dev]"
           fi
+      - name: Install Windows installer compiler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
       - name: Build Unix bundle
         if: runner.os != 'Windows'
         shell: bash
         run: ${{ matrix.build_cmd }}
-      - name: Build Windows bundle
+      - name: Build Windows bundle and installer
         if: runner.os == 'Windows'
         shell: pwsh
-        run: .\scripts\build_windows.ps1
+        run: .\scripts\build_windows.ps1 -Installer -RequireInstaller
       - name: Smoke test Unix bundle
         if: runner.os == 'Linux'
         shell: bash
@@ -114,9 +121,39 @@ jobs:
           New-Item -ItemType Directory -Force smoke-folder1004 | Out-Null
           Set-Content -Path smoke-folder1004\sample.txt -Value 'hello'
           .\dist\folder1004\folder1004.exe --cli --path smoke-folder1004 --mock --dry-run --quiet
+      - name: Verify Windows installer artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path .\dist\Folder1004-Setup.exe)) {
+            throw "Missing installer: dist\Folder1004-Setup.exe"
+          }
+          $item = Get-Item .\dist\Folder1004-Setup.exe
+          if ($item.Length -lt 1MB) {
+            throw "Installer is unexpectedly small: $($item.Length) bytes"
+          }
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.output }}
           if-no-files-found: error
+      - name: Upload Windows installer artifact
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Folder1004-Windows-Installer
+          path: dist/Folder1004-Setup.exe
+          if-no-files-found: error
+      - name: Attach Windows installer to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') && runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          gh release view $env:TAG_NAME *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:TAG_NAME --title "Folder1004 $env:TAG_NAME" --notes "Automated Folder1004 release artifacts."
+          }
+          gh release upload $env:TAG_NAME .\dist\Folder1004-Setup.exe --clobber
