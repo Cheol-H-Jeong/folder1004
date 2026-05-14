@@ -10,7 +10,7 @@ def test_full_pipeline_mock(tmp_path, monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
 
-    (tmp_path / "meeting-notes.md").write_text("# 회의 메모\n오늘 회의록.")
+    (tmp_path / "meeting-notes.md").write_text("# 회의 메모\n오늘 회의록.", encoding="utf-8")
     (tmp_path / "budget.xlsx").write_bytes(b"")
     (tmp_path / "invoice_2025.pdf").write_bytes(b"%PDF-1.4")
     (tmp_path / "photo.jpg").write_bytes(b"\xff\xd8\xff\xe0")

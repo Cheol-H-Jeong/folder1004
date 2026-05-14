@@ -25,6 +25,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Install Linux Qt runtime deps
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1
+
       - name: Install package + dev extras
         shell: bash
         run: |
