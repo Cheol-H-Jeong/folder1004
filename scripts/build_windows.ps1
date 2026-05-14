@@ -59,10 +59,10 @@ if ($Installer) {
         $isccPath = $iscc.FullName
     }
     & $isccPath "$root\scripts\folder1004.iss"
-    $installer = "$root\dist\Folder1004-Setup.exe"
-    if (-not (Test-Path $installer)) {
-        Write-Error "Installer build did not produce $installer"
+    $installerPath = "$root\dist\Folder1004-Setup.exe"
+    if (-not (Test-Path $installerPath)) {
+        Write-Error "Installer build did not produce $installerPath"
     }
     Write-Host ""
-    Write-Host "Installer: $installer"
+    Write-Host "Installer: $installerPath"
 }
