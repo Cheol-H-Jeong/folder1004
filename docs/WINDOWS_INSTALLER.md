@@ -1,9 +1,13 @@
-# Windows installer distribution
+# Windows distribution
 
-Folder1004 publishes a normal Windows installer named
-`Folder1004-Setup.exe`.
+Folder1004 publishes both:
+
+- `Folder1004-Setup.exe` — normal per-user installer.
+- `Folder1004-Windows-Portable.zip` — no-install portable mode.
 
 ## For users
+
+### Normal installer
 
 1. Open the Folder1004 GitHub **Releases** page.
 2. Download `Folder1004-Setup.exe`.
@@ -14,6 +18,19 @@ Folder1004 publishes a normal Windows installer named
 The installer uses per-user installation by default, so it does not
 require administrator rights.  Because the executable is not code-signed
 yet, Windows SmartScreen may show a warning on first launch.
+
+### No-install portable mode
+
+1. Download `Folder1004-Windows-Portable.zip`.
+2. Extract it anywhere, for example Desktop, Downloads, or a USB drive.
+3. Open the extracted `folder1004` folder.
+4. Run `folder1004.exe`.
+
+The portable ZIP contains a `folder1004.portable` marker.  When that
+marker is present, Folder1004 stores settings, logs, and its local index
+inside `folder1004\data` next to the executable instead of using
+`%LOCALAPPDATA%\Folder1004`.  To reset the portable copy, close the app
+and delete that `data` folder.
 
 If the app closes unexpectedly, open **로그 폴더 열기** after relaunching
 and send the newest `gui_*.log` / `organize_*.log`.  The Windows build
@@ -26,13 +43,14 @@ Build locally on Windows:
 
 ```powershell
 pip install -e ".[dev,windows]"
-.\scripts\build_windows.ps1 -Installer -RequireInstaller
+.\scripts\build_windows.ps1 -PortableZip -Installer -RequireInstaller
 ```
 
-The installer is written to:
+The Windows distributables are written to:
 
 ```text
 dist\Folder1004-Setup.exe
+dist\Folder1004-Windows-Portable.zip
 ```
 
 Requirements:
@@ -51,6 +69,7 @@ Useful Windows stability override knobs for reproducing field reports:
   classify from filename/metadata instead (default: `64`).
 
 GitHub Actions installs Inno Setup automatically for Windows package
-jobs, verifies that `dist\Folder1004-Setup.exe` exists, uploads it as
-the `Folder1004-Windows-Installer` artifact, and attaches it to tagged
-GitHub Releases.
+jobs, verifies both `dist\Folder1004-Setup.exe` and
+`dist\Folder1004-Windows-Portable.zip`, uploads them as
+`Folder1004-Windows-Installer` / `Folder1004-Windows-Portable`
+artifacts, and attaches both to tagged GitHub Releases.

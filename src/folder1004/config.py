@@ -132,6 +132,33 @@ def provider_label(cfg: "Config") -> str:
     return "Gemini"
 
 
+def _portable_home_from_marker() -> Optional[Path]:
+    """Return a bundle-local data dir when the frozen app is in portable mode.
+
+    Portable Windows ZIP builds place a ``folder1004.portable`` marker next
+    to ``folder1004.exe``.  In that mode we keep config, logs, and the index
+    under ``<bundle>/data`` so users can unzip and run without installing or
+    writing settings into AppData.  ``FOLDER1004_HOME`` still wins as the
+    explicit override.
+    """
+    if os.environ.get("FOLDER1004_PORTABLE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return Path(sys.executable).resolve().parent / "data"
+    if not getattr(sys, "frozen", False):
+        return None
+    try:
+        exe_dir = Path(sys.executable).resolve().parent
+    except Exception:
+        return None
+    if (exe_dir / "folder1004.portable").exists():
+        return exe_dir / "data"
+    return None
+
+
 def default_paths() -> AppPaths:
     """Pick a platform-appropriate data dir.
 
@@ -149,6 +176,8 @@ def default_paths() -> AppPaths:
     override = os.environ.get("FOLDER1004_HOME")
     if override:
         base = Path(override).expanduser()
+    elif portable := _portable_home_from_marker():
+        base = portable
     elif sys.platform.startswith("win"):
         base = Path(
             os.environ.get("LOCALAPPDATA")

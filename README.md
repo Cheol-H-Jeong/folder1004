@@ -57,18 +57,21 @@ archives.
 
 Grab a release for your OS from the [Releases](https://github.com/Cheol-H-Jeong/folder1004/releases)
 page.  CI builds them on every tag (Linux bundle / macOS .app / Windows
-installer + one-folder bundle):
+installer + portable ZIP):
 
 - **Linux** — `folder1004-linux-…` archive, extract anywhere, run
   `./folder1004/folder1004`.  An AppImage build is also produced when
   `appimagetool` is on the build host.
 - **macOS** — open the `.app`.  First launch: right-click → Open
   (Gatekeeper warning; signing/notarisation is pending).
-- **Windows** — download `Folder1004-Setup.exe`, run it, then launch
-  **Folder1004** from the Start menu or optional desktop shortcut.
-  `Folder1004-Windows` is also published as a portable one-folder
-  bundle for users who prefer not to install.  SmartScreen may warn on
-  first launch because the installer is currently unsigned.
+- **Windows installer** — download `Folder1004-Setup.exe`, run it, then
+  launch **Folder1004** from the Start menu or optional desktop shortcut.
+- **Windows no-install portable mode** — download
+  `Folder1004-Windows-Portable.zip`, extract it anywhere, then run
+  `folder1004\folder1004.exe`.  The ZIP includes a
+  `folder1004.portable` marker, so settings/logs/index data stay inside
+  `folder1004\data` next to the executable.  SmartScreen may warn on
+  first launch because the app is currently unsigned.
 
 ### From source (any OS, Python ≥ 3.11)
 
@@ -142,7 +145,9 @@ Flags: `--path PATH` `--recursive` `--dry-run` `--mock`
 | macOS   | `~/Library/Application Support/Folder1004` |
 | Windows | `%LOCALAPPDATA%\Folder1004` |
 
-Override with `FOLDER1004_HOME=/path/to/dir` for portable installs / tests.
+The Windows portable ZIP includes a `folder1004.portable` marker and uses
+`folder1004\data` next to `folder1004.exe`.  Override any platform with
+`FOLDER1004_HOME=/path/to/dir` for tests or custom portable layouts.
 
 The directory holds:
 - `config.json` — non-secret settings.
@@ -170,13 +175,15 @@ bash scripts/build_macos.sh dmg        # also build a .dmg via create-dmg
 
 # Windows (one-folder bundle in dist\folder1004\)
 .\scripts\build_windows.ps1
+.\scripts\build_windows.ps1 -PortableZip # also build dist\Folder1004-Windows-Portable.zip
 .\scripts\build_windows.ps1 -Installer # also build dist\Folder1004-Setup.exe
 ```
 
 Requires `pip install -e ".[dev]"` (Windows: add `,windows`).
 The Windows installer build also requires Inno Setup 6 (`iscc` on PATH,
 or installed in the default `Program Files` location).  CI installs Inno
-Setup automatically and uploads `Folder1004-Windows-Installer`.
+Setup automatically and uploads both `Folder1004-Windows-Installer` and
+`Folder1004-Windows-Portable`.
 PyInstaller spec is shared across all three OSes
 (`scripts/folder1004.spec`).
 

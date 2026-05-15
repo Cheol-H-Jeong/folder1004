@@ -106,7 +106,7 @@ jobs:
       - name: Build Windows bundle and installer
         if: runner.os == 'Windows'
         shell: pwsh
-        run: .\scripts\build_windows.ps1 -Installer -RequireInstaller
+        run: .\scripts\build_windows.ps1 -PortableZip -Installer -RequireInstaller
       - name: Smoke test Unix bundle
         if: runner.os == 'Linux'
         shell: bash
@@ -132,6 +132,35 @@ jobs:
           if ($item.Length -lt 1MB) {
             throw "Installer is unexpectedly small: $($item.Length) bytes"
           }
+      - name: Verify Windows portable artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path .\dist\Folder1004-Windows-Portable.zip)) {
+            throw "Missing portable ZIP: dist\Folder1004-Windows-Portable.zip"
+          }
+          $item = Get-Item .\dist\Folder1004-Windows-Portable.zip
+          if ($item.Length -lt 1MB) {
+            throw "Portable ZIP is unexpectedly small: $($item.Length) bytes"
+          }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead(
+            (Resolve-Path .\dist\Folder1004-Windows-Portable.zip).Path
+          )
+          try {
+            $entries = $zip.Entries.FullName
+            foreach ($required in @(
+              "folder1004/folder1004.exe",
+              "folder1004/folder1004.portable",
+              "folder1004/PORTABLE_README.txt"
+            )) {
+              if ($entries -notcontains $required) {
+                throw "Portable ZIP missing $required"
+              }
+            }
+          } finally {
+            $zip.Dispose()
+          }
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -145,6 +174,13 @@ jobs:
           name: Folder1004-Windows-Installer
           path: dist/Folder1004-Setup.exe
           if-no-files-found: error
+      - name: Upload Windows portable ZIP artifact
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Folder1004-Windows-Portable
+          path: dist/Folder1004-Windows-Portable.zip
+          if-no-files-found: error
       - name: Attach Windows installer to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v') && runner.os == 'Windows'
         shell: pwsh
@@ -156,4 +192,4 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             gh release create $env:TAG_NAME --title "Folder1004 $env:TAG_NAME" --notes "Automated Folder1004 release artifacts."
           }
-          gh release upload $env:TAG_NAME .\dist\Folder1004-Setup.exe --clobber
+          gh release upload $env:TAG_NAME .\dist\Folder1004-Setup.exe .\dist\Folder1004-Windows-Portable.zip --clobber

@@ -1,14 +1,17 @@
-# Build a Windows one-folder bundle (and optionally an Inno Setup installer).
+# Build a Windows one-folder bundle, optional portable ZIP, and optional
+# Inno Setup installer.
 #
 # Usage (PowerShell, repo root, with an activated venv that has dev + windows extras):
 #   pip install -e ".[dev,windows]"
 #   .\scripts\build_windows.ps1                # bundle only
+#   .\scripts\build_windows.ps1 -PortableZip   # bundle + no-install portable ZIP
 #   .\scripts\build_windows.ps1 -Installer     # bundle + .exe installer (requires Inno Setup 6 'iscc')
-#   .\scripts\build_windows.ps1 -Installer -RequireInstaller
+#   .\scripts\build_windows.ps1 -PortableZip -Installer -RequireInstaller
 #
 # Code signing / SmartScreen reputation is OUT OF SCOPE.  The unsigned
 # bundle still runs locally; SmartScreen may warn on first run.
 param(
+    [switch]$PortableZip,
     [switch]$Installer,
     [switch]$RequireInstaller
 )
@@ -31,6 +34,36 @@ if (-not (Test-Path $bundle)) {
 Write-Host ""
 Write-Host "Built bundle: $bundle"
 Write-Host "Run:          $bundle\folder1004.exe"
+
+if ($PortableZip) {
+    $portableRoot = "$root\dist\Folder1004-Windows-Portable"
+    $portableBundle = "$portableRoot\folder1004"
+    $portableZipPath = "$root\dist\Folder1004-Windows-Portable.zip"
+    Remove-Item -Recurse -Force $portableRoot -ErrorAction SilentlyContinue
+    Remove-Item -Force $portableZipPath -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force $portableRoot | Out-Null
+    New-Item -ItemType Directory -Force $portableBundle | Out-Null
+    Copy-Item -Recurse -Force "$bundle\*" $portableBundle
+    New-Item -ItemType File -Force "$portableBundle\folder1004.portable" | Out-Null
+    @"
+Folder1004 portable mode
+=========================
+
+No installation is required.
+
+1. Keep this whole folder together.
+2. Run folder1004.exe.
+3. Settings, logs, and the local index are stored in .\data next to this file.
+
+To reset portable data, close Folder1004 and delete the data folder.
+"@ | Set-Content -Path "$portableBundle\PORTABLE_README.txt" -Encoding UTF8
+    Compress-Archive -Path $portableBundle -DestinationPath $portableZipPath -CompressionLevel Optimal
+    if (-not (Test-Path $portableZipPath)) {
+        Write-Error "Portable ZIP build did not produce $portableZipPath"
+    }
+    Write-Host ""
+    Write-Host "Portable ZIP: $portableZipPath"
+}
 
 if ($Installer) {
     $iscc = Get-Command iscc -ErrorAction SilentlyContinue
