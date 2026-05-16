@@ -38,6 +38,25 @@ def test_extract_nouns_drops_dates_and_versions():
     assert all(not n.replace(".", "").isdigit() for n in out)
 
 
+def test_windows_defaults_to_safe_fallback(monkeypatch):
+    """Windows packaged builds must not construct kiwipiepy.Kiwi by default.
+
+    The native constructor can terminate the whole process with heap
+    corruption before Python can catch it, so the safety gate must trigger
+    before any import/constructor attempt.
+    """
+    monkeypatch.delenv("FOLDER1004_ENABLE_KIWI", raising=False)
+    monkeypatch.setattr(morph.sys, "platform", "win32")
+    morph._kiwi = object()
+    morph._kiwi_unavailable = False
+
+    assert morph._get_kiwi() is None
+    assert morph.extract_nouns("한국지역정보개발원 제안발표")
+
+    morph._kiwi = None
+    morph._kiwi_unavailable = False
+
+
 @pytest.mark.skipif(not morph.is_available(), reason="kiwi not installed")
 def test_kiwi_drops_person_name_when_followed_by_given_name():
     """``김철수 제안서`` should yield ``[제안서]`` — the surname+given

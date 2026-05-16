@@ -25,7 +25,9 @@ itself never raises.
 """
 from __future__ import annotations
 
+import os
 import re
+import sys
 import threading
 from typing import Optional
 
@@ -36,8 +38,28 @@ _kiwi_lock = threading.Lock()
 _kiwi_unavailable = False
 
 
+def _kiwi_disabled_by_platform() -> bool:
+    """Return True when kiwi should not be loaded in this process.
+
+    Windows portable/installer builds have shown native heap corruption
+    (0xc0000374) while constructing ``kiwipiepy.Kiwi`` inside the worker
+    thread.  That crash happens below Python and cannot be caught with
+    ``try/except``.  Therefore Windows defaults to the pure-Python
+    fallback tokenizer.  Advanced users can explicitly opt back in with
+    ``FOLDER1004_ENABLE_KIWI=1`` for local diagnostics.
+    """
+    flag = os.environ.get("FOLDER1004_ENABLE_KIWI", "").strip().lower()
+    if flag in {"1", "true", "yes", "on"}:
+        return False
+    return sys.platform.startswith("win")
+
+
 def _get_kiwi():
     global _kiwi, _kiwi_unavailable
+    if _kiwi_disabled_by_platform():
+        _kiwi_unavailable = True
+        _kiwi = None
+        return None
     if _kiwi is not None:
         return _kiwi
     if _kiwi_unavailable:
