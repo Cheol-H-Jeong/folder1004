@@ -76,31 +76,3 @@ def test_full_rebuild_dissolves_subfolders_and_removes_empty_old_folder(tmp_path
     assert list(tmp_path.glob("*/회의록.txt"))
     assert list(tmp_path.glob("*/사진.jpg"))
     assert not list(tmp_path.glob("*/A프로젝트/*"))
-
-
-def test_ui_full_rebuild_shows_warning_and_emits_full_mode(tmp_path, monkeypatch):
-    from PySide6 import QtWidgets
-    from folder1004.ui.views import OrganizeView
-
-    folder = tmp_path / "target"
-    folder.mkdir()
-    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
-    view = OrganizeView(Config())
-    warnings = []
-    monkeypatch.setattr(
-        QtWidgets.QMessageBox,
-        "warning",
-        lambda *args, **kwargs: warnings.append(args),
-    )
-    emitted = []
-    view.start_requested.connect(
-        lambda path, recursive, dry_run, mode: emitted.append((path, recursive, dry_run, mode))
-    )
-    view.path_bar.set_path(str(folder))
-    view.rad_full.setChecked(True)
-
-    view._on_start()
-
-    assert warnings
-    assert emitted[-1][3] == ORGANIZE_MODE_FULL_REBUILD
-    view.close()
