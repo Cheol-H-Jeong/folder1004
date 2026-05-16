@@ -8,7 +8,7 @@ never touch the user's real ``~/.folder1004/logs``.
 """
 import logging
 
-from folder1004.runlog import _redact, start_session
+from folder1004.runlog import _redact, recent_error_report, recent_log_files, start_session
 
 
 def test_redact_google_api_key():
@@ -68,3 +68,22 @@ def test_log_session_records_runtime_diagnostics(tmp_path, monkeypatch):
     assert "frozen=" in text
     assert "exe=" in text
     assert "mem" in text or "rss" in text
+
+
+def test_recent_error_report_finds_previous_error_log(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    log_path = start_session("pytesterr")
+    logging.getLogger("folder1004.test").error(
+        "Unhandled exception while testing: %s",
+        RuntimeError("boom"),
+    )
+
+    files = recent_log_files()
+    assert log_path in files
+    report = recent_error_report()
+    assert "Folder1004 최근 오류 기록" in report
+    assert str(log_path) in report
+    assert "Unhandled exception" in report
+    assert "boom" in report

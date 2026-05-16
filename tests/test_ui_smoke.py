@@ -159,6 +159,27 @@ def test_mainwindow_builds(tmp_path, monkeypatch):
     w.index_db.close()
 
 
+def test_mainwindow_has_recent_error_diagnostics_menu(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    paths = default_paths()
+    paths.ensure()
+    cfg = load_config(paths)
+
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    w = MainWindow(cfg, paths)
+    actions = [a.text() for a in w.menuBar().actions()]
+    assert any("진단" in text for text in actions)
+    diag_menu = next(a.menu() for a in w.menuBar().actions() if "진단" in a.text())
+    diag_actions = [a.text() for a in diag_menu.actions()]
+    assert any("최근 오류 기록 보기/복사" in text for text in diag_actions)
+    assert any("최근 오류 기록 바로 복사" in text for text in diag_actions)
+    assert any("로그 폴더 열기" in text for text in diag_actions)
+    w.close()
+    w.index_db.close()
+
+
 def test_cancel_path_never_force_terminates_qthread():
     src = (Path(__file__).resolve().parents[1]
            / "src" / "folder1004" / "ui" / "main.py").read_text(encoding="utf-8")

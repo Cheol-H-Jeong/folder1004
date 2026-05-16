@@ -131,6 +131,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.settings_view.config_changed.connect(self._on_config_changed)
 
         # Menu / shortcuts --------------------------------------------
+        self._build_menu()
         QtGui.QShortcut(QtGui.QKeySequence.Find, self, self._focus_search)
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+,"), self, lambda: self._goto(3))
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+1"), self, lambda: self._goto(0))
@@ -143,6 +144,29 @@ class MainWindow(QtWidgets.QMainWindow):
     def _apply_style(self):
         self.setStyleSheet(resolve_qss(self.config.appearance))
 
+    def _build_menu(self):
+        self.diagnostics_menu = QtWidgets.QMenu("진단", self)
+        self.menuBar().addMenu(self.diagnostics_menu)
+
+        show_errors = QtGui.QAction("최근 오류 기록 보기/복사…", self)
+        show_errors.setShortcut(QtGui.QKeySequence("Ctrl+Shift+E"))
+        show_errors.triggered.connect(self._show_recent_error_report)
+        self.diagnostics_menu.addAction(show_errors)
+
+        copy_errors = QtGui.QAction("최근 오류 기록 바로 복사", self)
+        copy_errors.triggered.connect(self._copy_recent_error_report)
+        self.diagnostics_menu.addAction(copy_errors)
+
+        self.diagnostics_menu.addSeparator()
+
+        open_logs = QtGui.QAction("로그 폴더 열기", self)
+        open_logs.triggered.connect(self._open_log_dir)
+        self.diagnostics_menu.addAction(open_logs)
+
+        open_current = QtGui.QAction("현재 로그 파일 열기", self)
+        open_current.triggered.connect(self._open_current_log)
+        self.diagnostics_menu.addAction(open_current)
+
     def _goto(self, idx: int):
         self.stack.setCurrentIndex(idx)
         for i, btn in enumerate(self.nav_buttons):
@@ -154,6 +178,77 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _focus_search(self):
         self._goto(1)
+
+    def _open_log_dir(self):
+        from ..config import default_paths
+        from .views import _open_in_explorer
+
+        d = default_paths().logs_dir
+        d.mkdir(parents=True, exist_ok=True)
+        _open_in_explorer(d)
+
+    def _open_current_log(self):
+        from ..runlog import current_log_path
+        from .views import _open_in_explorer
+
+        p = current_log_path()
+        if p is not None and p.exists():
+            _open_in_explorer(p)
+        else:
+            self.statusBar().showMessage("현재 로그 파일을 찾지 못했습니다.", 4000)
+
+    def _copy_recent_error_report(self):
+        from ..runlog import recent_error_report
+
+        report = recent_error_report()
+        QtWidgets.QApplication.clipboard().setText(report)
+        self.statusBar().showMessage("최근 오류 기록을 클립보드에 복사했습니다.", 5000)
+
+    def _show_recent_error_report(self):
+        from ..runlog import recent_error_report
+
+        report = recent_error_report()
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("최근 오류 기록")
+        dialog.resize(860, 620)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 14)
+        layout.setSpacing(10)
+
+        intro = QtWidgets.QLabel(
+            "최근 실행/정리 로그에서 오류·Traceback·강제 종료 단서를 모았습니다. "
+            "아래 내용을 복사해서 전달하면 원인 분석에 사용할 수 있습니다."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        text = QtWidgets.QPlainTextEdit()
+        text.setReadOnly(True)
+        text.setPlainText(report)
+        text.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap)
+        text.setMinimumHeight(420)
+        text.setStyleSheet(
+            "QPlainTextEdit { font-family:'JetBrains Mono','SF Mono',Consolas,monospace; "
+            "font-size:12px; }"
+        )
+        layout.addWidget(text, 1)
+
+        buttons = QtWidgets.QHBoxLayout()
+        open_logs = QtWidgets.QPushButton("로그 폴더 열기")
+        open_logs.setObjectName("Ghost")
+        open_logs.clicked.connect(self._open_log_dir)
+        copy = QtWidgets.QPushButton("클립보드에 복사")
+        copy.setObjectName("Primary")
+        copy.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(text.toPlainText()))
+        copy.clicked.connect(lambda: self.statusBar().showMessage("최근 오류 기록을 복사했습니다.", 5000))
+        close = QtWidgets.QPushButton("닫기")
+        close.clicked.connect(dialog.accept)
+        buttons.addWidget(open_logs)
+        buttons.addStretch(1)
+        buttons.addWidget(copy)
+        buttons.addWidget(close)
+        layout.addLayout(buttons)
+        dialog.exec()
 
     def _update_status_badge(self):
         from ..config import get_api_key, provider_label
@@ -236,6 +331,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.close()
 
     def _on_failed(self, msg: str):
+        log.error("organize failed: %s", msg)
         self.organize_view.on_failed(msg)
         self._teardown_worker()
         if getattr(self, "_closing_after_worker", False):

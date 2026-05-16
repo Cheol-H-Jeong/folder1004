@@ -39,7 +39,7 @@ if [[ "${1:-}" == "dmg" ]]; then
         echo "create-dmg not found — run: brew install create-dmg" >&2
         exit 0
     fi
-    DMG="$ROOT/dist/Folder1004-1.0.0.dmg"
+    DMG="$ROOT/dist/Folder1004-1.0.2.dmg"
     rm -f "$DMG"
     create-dmg \
         --volname "Folder1004" \

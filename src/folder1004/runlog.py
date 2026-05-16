@@ -32,6 +32,13 @@ _active_path: Optional[Path] = None
 _install_count = 0
 _thread_hook_installed = False
 
+_ERROR_HINT_RE = re.compile(
+    r"(?i)\b("
+    r"ERROR|CRITICAL|Traceback|Fatal Python error|Unhandled|exception|"
+    r"access violation|segmentation fault|MemoryError|crash|failed"
+    r")\b"
+)
+
 
 # Patterns we MUST never write to disk.  Hits anywhere in a log record
 # (message, args, exception text) are replaced before reaching the file.
@@ -228,6 +235,129 @@ def start_session(tag: str = "session") -> Path:
 
 def current_log_path() -> Optional[Path]:
     return _active_path
+
+
+def recent_log_files(limit: int = 12) -> list[Path]:
+    """Return newest Folder1004 log files.
+
+    This intentionally does not depend on the active process state: after a
+    Windows GUI crash, the next launch can still scan the persisted log
+    directory and let the user copy the relevant error report.
+    """
+    try:
+        paths = default_paths()
+        paths.logs_dir.mkdir(parents=True, exist_ok=True)
+        files = [p for p in paths.logs_dir.glob("*.log") if p.is_file()]
+        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        return files[: max(0, int(limit))]
+    except Exception:
+        return []
+
+
+def _read_log_text(path: Path, max_bytes: int = 384_000) -> str:
+    """Read a tail-biased slice of a log file without loading huge logs."""
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as fh:
+            if size > max_bytes:
+                fh.seek(max(0, size - max_bytes))
+                data = fh.read()
+                # Drop a partial first line when we read from the middle.
+                data = data.splitlines()[1:] if b"\n" in data else [data]
+                raw = b"\n".join(data)
+            else:
+                raw = fh.read()
+        return _redact(raw.decode("utf-8", errors="replace"))
+    except Exception as exc:
+        return f"<log read failed: {path} — {exc}>"
+
+
+def _excerpt_error_lines(text: str, *, before: int = 4, after: int = 24) -> str:
+    lines = text.splitlines()
+    hit_indices = [i for i, line in enumerate(lines) if _ERROR_HINT_RE.search(line)]
+    if not hit_indices:
+        return ""
+    ranges: list[tuple[int, int]] = []
+    for idx in hit_indices[-8:]:
+        start = max(0, idx - before)
+        end = min(len(lines), idx + after + 1)
+        if ranges and start <= ranges[-1][1] + 1:
+            ranges[-1] = (ranges[-1][0], max(ranges[-1][1], end))
+        else:
+            ranges.append((start, end))
+    chunks: list[str] = []
+    for start, end in ranges:
+        if chunks:
+            chunks.append("…")
+        chunks.extend(lines[start:end])
+    return "\n".join(chunks).strip()
+
+
+def recent_error_report(*, max_logs: int = 8, max_chars: int = 32_000) -> str:
+    """Build a clipboard-friendly report from recent error-bearing logs.
+
+    If no explicit ERROR/Traceback/Fatal line exists (common when a native
+    process vanishes abruptly), include the tail of the newest log so the
+    user can still send the last recorded stage and runtime diagnostics.
+    """
+    files = recent_log_files(max_logs)
+    header = [
+        "Folder1004 최근 오류 기록",
+        f"generated_at={_dt.datetime.now().isoformat(timespec='seconds')}",
+        f"platform={platform.platform()}",
+        f"python={sys.version.split()[0]}",
+        f"logs_scanned={len(files)}",
+    ]
+    if not files:
+        return "\n".join(header + ["", "로그 파일을 찾지 못했습니다."])
+
+    sections: list[str] = []
+    for path in files:
+        text = _read_log_text(path)
+        excerpt = _excerpt_error_lines(text)
+        if not excerpt:
+            continue
+        try:
+            mtime = _dt.datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
+        except Exception:
+            mtime = "unknown"
+        sections.append(
+            "\n".join(
+                [
+                    "=" * 72,
+                    f"log={path}",
+                    f"modified={mtime}",
+                    "-" * 72,
+                    excerpt,
+                ]
+            )
+        )
+
+    if not sections:
+        newest = files[0]
+        tail_lines = _read_log_text(newest).splitlines()[-90:]
+        try:
+            mtime = _dt.datetime.fromtimestamp(newest.stat().st_mtime).isoformat(timespec="seconds")
+        except Exception:
+            mtime = "unknown"
+        sections.append(
+            "\n".join(
+                [
+                    "=" * 72,
+                    "최근 로그에는 ERROR/CRITICAL/Traceback 라인이 없습니다.",
+                    "갑작스러운 종료라면 아래 마지막 로그 꼬리가 가장 유용합니다.",
+                    f"log={newest}",
+                    f"modified={mtime}",
+                    "-" * 72,
+                    "\n".join(tail_lines),
+                ]
+            )
+        )
+
+    report = "\n".join(header + [""] + sections).strip()
+    if len(report) > max_chars:
+        report = report[: max_chars - 200] + "\n\n… <보고서가 길어 앞부분만 복사됨>"
+    return report
 
 
 def log_exception(label: str, exc: BaseException) -> None:
