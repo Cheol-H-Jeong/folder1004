@@ -133,6 +133,18 @@ _DIGITS_ONLY = re.compile(r"^\d+(?:[.,]\d+)?$")
 
 _FALLBACK_TOKEN_RE = re.compile(r"[A-Za-z가-힣][A-Za-z가-힣0-9]+")
 
+_KOREAN_RE = re.compile(r"^[가-힣]+$")
+_ASCII_RE = re.compile(r"^[A-Za-z]+$")
+
+# Very broad two-syllable Korean words that are useful for extract_nouns()
+# but too generic to be trusted as standalone named-entity evidence in the
+# no-kiwi fallback used by Windows builds.
+_GENERIC_SHORT_KO = {
+    "지원", "운영", "체계", "구축", "산업", "사업", "구매", "계약",
+    "예방", "돌봄", "로봇", "공학", "기술", "자료", "문서", "보고",
+    "발표", "제안", "계획", "본문", "검사", "관리", "개발", "분석",
+}
+
 
 # ----- main API ------------------------------------------------------------
 
@@ -161,10 +173,7 @@ def extract_proper_nouns(text: str) -> list[str]:
         return []
     kiwi = _get_kiwi()
     if kiwi is None:
-        # No kiwi → can't reliably tell named entities from common
-        # nouns.  Return nothing so callers fall back to a coarser
-        # matching strategy rather than over-trusting a regex split.
-        return []
+        return _fallback_proper_nouns(text)
     out: list[str] = []
     seen: set[str] = set()
     try:
@@ -229,6 +238,72 @@ def extract_proper_nouns(text: str) -> list[str]:
         out.append(norm)
         seen.add(norm)
         i += 1
+    return out
+
+
+def _looks_like_person_name(token: str) -> bool:
+    return (
+        2 <= len(token) <= 3
+        and token[0] in _PERSON_SURNAMES
+        and _KOREAN_RE.match(token) is not None
+        and not token.endswith(_INSTITUTION_SUFFIXES)
+    )
+
+
+def _fallback_proper_nouns(text: str) -> list[str]:
+    """Conservative named-entity fallback for Windows/no-kiwi builds.
+
+    The Windows app deliberately avoids constructing ``kiwipiepy.Kiwi`` to
+    prevent a native heap-corruption crash.  Returning an empty proper-noun
+    set made the time-window rescue unusable on Windows, so this fallback
+    keeps only exact, high-signal surface tokens:
+
+    * Latin acronyms/words of length >= 3 (``RTX``, ``GPU``), never ``AI``.
+    * Korean/mixed tokens of length >= 3 after person-name/noise filters.
+    * A tiny allow-list of domain-bearing 2-syllable words that are needed
+      for exact overlap when Kiwi is unavailable (currently ``심사``).
+    * Adjacent Korean compound forms such as ``의약품심사`` so domain+action
+      pairs can still match without admitting every generic 2-syllable noun.
+    """
+    raw: list[str] = []
+    for m in _FALLBACK_TOKEN_RE.finditer(text):
+        tok = m.group(0).strip()
+        if not tok:
+            continue
+        norm = tok.casefold() if tok[0].isascii() else tok
+        if _DIGITS_ONLY.match(norm) or _EXT_LIKE.match(norm) or norm in _NOISE_NOUNS:
+            continue
+        if _ASCII_RE.match(tok) and len(norm) < 3:
+            continue
+        if _looks_like_person_name(norm):
+            continue
+        raw.append(norm)
+
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(tok: str) -> None:
+        if len(tok) < 2 or tok in seen:
+            return
+        out.append(tok)
+        seen.add(tok)
+
+    for tok in raw:
+        if _KOREAN_RE.match(tok):
+            if len(tok) >= 3 or tok == "심사":
+                add(tok)
+        elif len(tok) >= 3:
+            add(tok)
+
+    ko_words = [t for t in raw if _KOREAN_RE.match(t)]
+    for a, b in zip(ko_words, ko_words[1:]):
+        if (
+            (len(a) < 3 or len(b) < 3)
+            and len(a) >= 3
+            and (len(b) >= 3 or b not in _GENERIC_SHORT_KO or b == "심사")
+        ):
+            add(a + b)
+
     return out
 
 

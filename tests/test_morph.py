@@ -57,6 +57,31 @@ def test_windows_defaults_to_safe_fallback(monkeypatch):
     morph._kiwi_unavailable = False
 
 
+def test_windows_safe_fallback_keeps_substantive_proper_tokens(monkeypatch):
+    """The no-Kiwi Windows path must still leave enough exact Korean
+    identity tokens for rescue matching while excluding bare 2-letter AI.
+    """
+    monkeypatch.delenv("FOLDER1004_ENABLE_KIWI", raising=False)
+    monkeypatch.setattr(morph.sys, "platform", "win32")
+    morph._kiwi = None
+    morph._kiwi_unavailable = False
+
+    pn = set(morph.extract_proper_nouns("의약품 AI 심사 및 산업지원"))
+    assert {"의약품", "심사", "의약품심사"} <= pn
+    assert "ai" not in pn
+
+    pn = set(morph.extract_proper_nouns("행안부 범정부 AI 공통기반 문서인식"))
+    assert {"행안부", "문서인식"} <= pn
+
+    pn = set(morph.extract_proper_nouns("김민지 kimminji 박규리 parkgyuri"))
+    assert "김민지" not in pn
+    assert "박규리" not in pn
+    assert {"kimminji", "parkgyuri"} <= pn
+
+    morph._kiwi = None
+    morph._kiwi_unavailable = False
+
+
 @pytest.mark.skipif(not morph.is_available(), reason="kiwi not installed")
 def test_kiwi_drops_person_name_when_followed_by_given_name():
     """``김철수 제안서`` should yield ``[제안서]`` — the surname+given
