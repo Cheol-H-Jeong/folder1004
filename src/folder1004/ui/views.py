@@ -91,17 +91,24 @@ class FlowLayout(QtWidgets.QLayout):
         while self.count():
             self.takeAt(0)
 
+    def _safe_items(self) -> list[QtWidgets.QLayoutItem]:
+        # Qt can call virtual layout methods during construction/destruction
+        # on Windows/PySide before Python attributes are fully initialized.
+        return getattr(self, "_items", [])
+
     def addItem(self, item: QtWidgets.QLayoutItem) -> None:
         self._items.append(item)
 
     def count(self) -> int:
-        return len(self._items)
+        return len(self._safe_items())
 
     def itemAt(self, index: int) -> QtWidgets.QLayoutItem | None:
-        return self._items[index] if 0 <= index < len(self._items) else None
+        items = self._safe_items()
+        return items[index] if 0 <= index < len(items) else None
 
     def takeAt(self, index: int) -> QtWidgets.QLayoutItem | None:
-        return self._items.pop(index) if 0 <= index < len(self._items) else None
+        items = self._safe_items()
+        return items.pop(index) if 0 <= index < len(items) else None
 
     def expandingDirections(self) -> QtCore.Qt.Orientations:
         return QtCore.Qt.Orientations(QtCore.Qt.Orientation(0))
