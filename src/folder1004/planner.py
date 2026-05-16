@@ -199,6 +199,18 @@ def _safe_path_repr(path_str: str, is_mojibake, *, anonymise_parents: bool = Fal
     return str(Path(*redacted))
 
 
+def _previous_folder_hint(path_str: str) -> str:
+    """Human-readable parent folder hint for full rebuild mode."""
+    if not path_str:
+        return ""
+    p = Path(path_str)
+    parents = [part for part in p.parts[:-1] if part not in (p.anchor, "")]
+    # Keep only the closest meaningful ancestors; absolute drive/home prefixes
+    # are usually noise while the previous classification folders are near leaf.
+    parents = parents[-3:]
+    return " / ".join(parents)
+
+
 # ----- opaque-filename detector + keyword-overlap veto --------------------
 #
 # Pre-Pass-1 safety net.  Filenames that carry zero project identity
@@ -454,6 +466,46 @@ def _unique_categories(cat_list: list[dict]) -> list[dict]:
     return list(seen.values())
 
 
+def _merge_seed_categories_into_mock(plan_dict: dict, payloads: list[dict], seeds: list[dict]) -> dict:
+    """Teach the offline mock planner about preserved existing folders."""
+    if not seeds:
+        return plan_dict
+    import re as _re
+
+    out = dict(plan_dict or {})
+    cats = list(seeds) + list(out.get("categories", []) or [])
+    out["categories"] = _unique_categories(cats)
+    payload_by_path = {str(p.get("path") or ""): p for p in payloads}
+
+    def tokens(text: str) -> set[str]:
+        return {t for t in _re.split(r"[^A-Za-z0-9가-힣]+", text.lower()) if len(t) >= 2}
+
+    seed_rows = []
+    for seed in seeds:
+        sid = str(seed.get("id") or "").strip()
+        name = str(seed.get("name") or "").strip()
+        if sid and name:
+            seed_rows.append((sid, name.lower(), tokens(name)))
+
+    for a in out.get("assignments", []) or []:
+        payload = payload_by_path.get(str(a.get("path") or ""), {})
+        hay = f"{payload.get('name','')} {payload.get('excerpt','')}".lower()
+        hay_tokens = tokens(hay)
+        best: tuple[int, str] = (0, "")
+        for sid, seed_name, seed_tokens in seed_rows:
+            score = 0
+            if seed_name and seed_name in hay:
+                score += 5
+            score += len(seed_tokens & hay_tokens)
+            if score > best[0]:
+                best = (score, sid)
+        if best[0] > 0:
+            a["primary"] = best[1]
+            a["primary_score"] = max(float(a.get("primary_score") or 0.0), 0.82)
+            a["reason"] = (a.get("reason") or "") + " / 기존 폴더명과 매칭"
+    return out
+
+
 class Planner:
     def __init__(
         self,
@@ -655,6 +707,12 @@ class Planner:
         progress: Optional[ProgressCB] = None,
     ) -> Plan:
         if not entries:
+            if self.seed_categories:
+                return _plan_from_dict(
+                    {"categories": self.seed_categories, "assignments": []},
+                    [],
+                    reclassify_mode=bool(getattr(self.config, "reclassify_mode", False)),
+                )
             return Plan(categories=[], assignments=[])
 
         # Build LLM payloads, capping the per-file excerpt so a single
@@ -667,6 +725,8 @@ class Planner:
         from .llm.client import _looks_like_mojibake
 
         anonymise = bool(getattr(self.config, "reclassify_mode", False))
+        organize_mode = str(getattr(self.config, "organize_mode", "") or "").lower()
+        include_previous_hint = organize_mode == "full_rebuild"
         # Re-classify mode hides parent folder names, so the LLM has
         # less context to work with.  Compensate by lifting the per-file
         # excerpt cap to the full max_excerpt_chars so file *content*
@@ -681,8 +741,13 @@ class Planner:
             d = e.to_summary_dict()
             excerpt = d.get("excerpt", "") or ""
             d["excerpt"] = excerpt[:per_file_cap]
+            original_path = d.get("path") or ""
+            if include_previous_hint:
+                hint = _previous_folder_hint(original_path)
+                if hint:
+                    d["previous_folder_hint"] = hint
             d["path"] = _safe_path_repr(
-                d.get("path") or "", _looks_like_mojibake, anonymise_parents=anonymise
+                original_path, _looks_like_mojibake, anonymise_parents=anonymise
             )
             payloads.append(d)
 
@@ -696,6 +761,7 @@ class Planner:
                 progress(self._tier_announcement(tier, len(entries)), 0.16)
                 progress("mock-planner: API 키 없음 — 휴리스틱으로 분류합니다.", 0.5)
             plan_dict = mock_planner.plan(payloads, self.config.ambiguity_threshold)
+            plan_dict = _merge_seed_categories_into_mock(plan_dict, payloads, self.seed_categories)
             return _plan_from_dict(plan_dict, entries, reclassify_mode=anonymise)
 
         # ------------------------------------------------------------------
@@ -736,6 +802,21 @@ class Planner:
         except Exception as exc:
             log.warning("rolling module unavailable (%s); falling through", exc)
             _rolling = None
+
+        if _rolling is not None and self.seed_categories:
+            try:
+                if progress:
+                    progress("plan: 기존 폴더 카탈로그 기반 rolling 모드…", 0.18)
+                plan_dict = self._rolling_plan(entries, payloads, progress)
+                return _plan_from_dict(plan_dict, entries, reclassify_mode=anonymise)
+            except Exception as exc:
+                log.warning("seeded rolling plan failed; falling back: %s", exc)
+                if progress:
+                    progress(
+                        f"⚠ 기존 폴더 기반 플래너 실패 — 일반 fallback 으로 전환: "
+                        f"{type(exc).__name__}: {str(exc)[:200]}",
+                        -1.0,
+                    )
 
         if _rolling is not None and _rolling.should_use_rolling(self.config, len(entries)):
             try:

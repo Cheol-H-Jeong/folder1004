@@ -11,6 +11,36 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
+
+ORGANIZE_MODE_BUNDLE_REBUILD = "bundle_rebuild"
+ORGANIZE_MODE_PRESERVE_EXISTING = "preserve_existing"
+ORGANIZE_MODE_PRESERVE_FOLDER1004 = "preserve_folder1004"
+ORGANIZE_MODE_FULL_REBUILD = "full_rebuild"
+
+ORGANIZE_MODE_ALIASES = {
+    "": ORGANIZE_MODE_BUNDLE_REBUILD,
+    "new": ORGANIZE_MODE_BUNDLE_REBUILD,
+    "bundle": ORGANIZE_MODE_BUNDLE_REBUILD,
+    "bundle_rebuild": ORGANIZE_MODE_BUNDLE_REBUILD,
+    "incremental": ORGANIZE_MODE_PRESERVE_EXISTING,
+    "preserve_existing": ORGANIZE_MODE_PRESERVE_EXISTING,
+    "additive": ORGANIZE_MODE_PRESERVE_FOLDER1004,
+    "preserve_folder1004": ORGANIZE_MODE_PRESERVE_FOLDER1004,
+    "full": ORGANIZE_MODE_FULL_REBUILD,
+    "full_rebuild": ORGANIZE_MODE_FULL_REBUILD,
+}
+
+
+def normalize_organize_mode(mode: str | None) -> str:
+    """Return the canonical per-run folder handling mode.
+
+    Legacy ids (``new``/``incremental``/``additive``) are still accepted
+    so old config files and older UI builds load safely.  The product
+    default is the safer bundle-preserving rebuild.
+    """
+    key = (mode or "").strip().lower()
+    return ORGANIZE_MODE_ALIASES.get(key, ORGANIZE_MODE_BUNDLE_REBUILD)
+
 _KEYRING_SERVICE = "folder1004"
 _KEYRING_USER = "gemini_api_key"  # legacy, kept for migration
 
@@ -325,15 +355,21 @@ class Config:
     reclassify_mode: bool = False
 
     # User-facing organize mode chosen on the start screen:
-    #   "new"          모든 기존 폴더 갈아엎기 — ignore existing sub-folder
-    #                 names and build the category catalogue from scratch.
-    #   "incremental"  기존 폴더 유지하기 — keep existing top-level folders as
-    #                 the canonical category list and place files into them,
-    #                 appending a new category only when nothing fits.
-    #   "additive"     Folder1004로 이미 생성한 폴더만 유지하기 — keep only signed
-    #                 Folder1004 folders as the catalogue and skip files
-    #                 already inside them.
-    organize_mode: str = "new"
+    #   "bundle_rebuild"       새 폴더 체계로 정리 — keep each existing
+    #                          top-level folder intact as a bundle, then move
+    #                          those bundles into a newly planned Folder1004
+    #                          category structure.  Legacy id: "new".
+    #   "preserve_existing"    기존 폴더 체계 유지 — keep all existing
+    #                          top-level folders as the catalogue and add only
+    #                          missing folders.  Legacy id: "incremental".
+    #   "preserve_folder1004"  Folder1004 폴더만 유지 — keep only signed
+    #                          Folder1004 folders, and re-sort new loose
+    #                          files/plain folders as intact bundles.
+    #                          Legacy id: "additive".
+    #   "full_rebuild"         모든 폴더 해체 후 재정리 — dissolve all
+    #                          folders and classify every file individually,
+    #                          using old folder names only as weak hints.
+    organize_mode: str = ORGANIZE_MODE_BUNDLE_REBUILD
 
     # Duplicate-file dedup threshold (bytes).  When ≥ 2 files share
     # the same content (size + hash), all but one are *deleted* after
@@ -352,6 +388,7 @@ class Config:
         for k, v in data.items():
             if hasattr(cfg, k):
                 setattr(cfg, k, v)
+        cfg.organize_mode = normalize_organize_mode(getattr(cfg, "organize_mode", ""))
         return cfg
 
 

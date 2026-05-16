@@ -11,7 +11,12 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from ..config import (
     CLASSIFICATION_GUIDANCE_PRESETS,
     Config,
+    ORGANIZE_MODE_BUNDLE_REBUILD,
+    ORGANIZE_MODE_FULL_REBUILD,
+    ORGANIZE_MODE_PRESERVE_EXISTING,
+    ORGANIZE_MODE_PRESERVE_FOLDER1004,
     get_api_key,
+    normalize_organize_mode,
     save_config,
     set_api_key,
 )
@@ -305,19 +310,18 @@ class OrganizeView(QtWidgets.QWidget):
         opt_row.addWidget(self.chk_recursive)
         opt_row.addStretch(1)
 
-        # 폴더 처리 방식 카드 — 기존 폴더를 어떻게 다룰지만 고르게 한다.
-        # 내부 mode 값은 호환성을 위해 new/incremental/additive를 유지한다.
+        # 정리 방식 카드 — 최상위 폴더 체계와 하위 폴더 해체 여부를 명확히 고른다.
         mode_card = Card()
         mc = QtWidgets.QVBoxLayout(mode_card)
         mc.setContentsMargins(18, 14, 18, 14)
         mc.setSpacing(10)
         mode_head = QtWidgets.QHBoxLayout()
         mode_head.setSpacing(18)
-        mode_lbl = QtWidgets.QLabel("기존 폴더 처리")
+        mode_lbl = QtWidgets.QLabel("정리 방식")
         mode_lbl.setObjectName("ModeTitle")
         mode_lbl.setStyleSheet("font-weight:600;")
         mode_lbl.setMinimumWidth(112)
-        mode_hint = QtWidgets.QLabel("기본값 그대로 두면 Folder1004가 폴더 상태를 보고 알아서 판단해 정리합니다.")
+        mode_hint = QtWidgets.QLabel("기본 추천을 사용하면 Folder1004가 폴더 묶음을 보고 알아서 판단하되, 기존 하위 폴더는 해체하지 않습니다. 완전 재분류는 마지막 옵션에서만 실행됩니다.")
         mode_hint.setObjectName("ModeHint")
         mode_hint.setWordWrap(True)
         mode_hint.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
@@ -328,38 +332,44 @@ class OrganizeView(QtWidgets.QWidget):
         mc.addLayout(mode_head)
         mode_options_wrap = QtWidgets.QWidget()
         mode_options = FlowLayout(mode_options_wrap, margin=0, hspacing=20, vspacing=8)
-        self.rad_new = QtWidgets.QRadioButton("모든 기존 폴더 갈아엎기")
-        self.rad_new.setToolTip(
-            "기존 하위 폴더를 무시하고 처음부터 폴더 체계를 새로 만듭니다.\n"
-            "처음 정리하는 폴더에 사용하세요."
+
+        self.rad_bundle = QtWidgets.QRadioButton("새 폴더 체계로 정리 (자동 판단 기본값·추천)")
+        self.rad_bundle.setToolTip(
+            "기존 하위 폴더는 해체하지 않고, 새로 만든 Folder1004 분류 폴더 안으로\n"
+            "폴더째 이동합니다. 최상위 체계만 새롭게 잡을 때 사용하세요."
         )
-        self.rad_inc = QtWidgets.QRadioButton("기존 폴더 유지하기")
-        self.rad_inc.setToolTip(
-            "기존 최상위 폴더를 카테고리 목록으로 사용하고 모든 파일을\n"
-            "다시 분류합니다. 손으로 정리한 폴더 체계는 유지하면서 안의\n"
-            "내용을 한 번 더 다듬을 때 사용하세요."
+        self.rad_existing = QtWidgets.QRadioButton("기존 폴더 체계 유지")
+        self.rad_existing.setToolTip(
+            "기존 최상위 폴더는 그대로 두고, 루트에 흩어진 파일만 알맞은 기존 폴더나\n"
+            "새 Folder1004 폴더에 넣습니다. 기존 폴더 내부는 건드리지 않습니다."
         )
-        self.rad_add = QtWidgets.QRadioButton("Folder1004로 이미 생성한 폴더만 유지하기")
-        self.rad_add.setToolTip(
-            "Folder1004 가 만든 폴더는 그대로 두고, 새로 부어 넣은\n"
-            "파일만 그 폴더들에 추가하거나 필요시 새 폴더를 만듭니다.\n"
-            "이미 정리된 폴더에 새 파일만 쏟아 넣고 정리할 때 사용하세요."
+        self.rad_folder1004 = QtWidgets.QRadioButton("Folder1004 폴더만 유지")
+        self.rad_folder1004.setToolTip(
+            "Folder1004가 만든 폴더는 그대로 두고, 그 밖의 파일과 일반 폴더만\n"
+            "묶음 단위로 기존/새 Folder1004 폴더에 정리합니다."
         )
-        current_mode = (getattr(self.config, "organize_mode", "new") or "new").lower()
-        self.rad_new.setChecked(current_mode == "new")
-        self.rad_inc.setChecked(current_mode == "incremental")
-        self.rad_add.setChecked(current_mode == "additive")
-        self.rad_new.setText("모든 기존 폴더 갈아엎기 (자동 판단 기본값)")
-        # Default to "new" if nothing matched.
-        if not (self.rad_new.isChecked() or self.rad_inc.isChecked() or self.rad_add.isChecked()):
-            self.rad_new.setChecked(True)
+        self.rad_full = QtWidgets.QRadioButton("모든 폴더 해체 후 재정리 (주의)")
+        self.rad_full.setToolTip(
+            "하위 폴더 안의 파일까지 모두 꺼내 파일 단위로 다시 분류합니다.\n"
+            "기존 폴더명은 참고 힌트로만 사용합니다."
+        )
+
+        # Backwards-compatible attribute names used by older tests/plugins.
+        self.rad_new = self.rad_bundle
+        self.rad_inc = self.rad_existing
+        self.rad_add = self.rad_folder1004
+
+        current_mode = normalize_organize_mode(getattr(self.config, "organize_mode", ""))
+        self.rad_bundle.setChecked(current_mode == ORGANIZE_MODE_BUNDLE_REBUILD)
+        self.rad_existing.setChecked(current_mode == ORGANIZE_MODE_PRESERVE_EXISTING)
+        self.rad_folder1004.setChecked(current_mode == ORGANIZE_MODE_PRESERVE_FOLDER1004)
+        self.rad_full.setChecked(current_mode == ORGANIZE_MODE_FULL_REBUILD)
+        if not (self.rad_bundle.isChecked() or self.rad_existing.isChecked() or self.rad_folder1004.isChecked() or self.rad_full.isChecked()):
+            self.rad_bundle.setChecked(True)
         mode_grp = QtWidgets.QButtonGroup(self)
-        mode_grp.addButton(self.rad_new)
-        mode_grp.addButton(self.rad_inc)
-        mode_grp.addButton(self.rad_add)
-        mode_options.addWidget(self.rad_new)
-        mode_options.addWidget(self.rad_inc)
-        mode_options.addWidget(self.rad_add)
+        for rb in (self.rad_bundle, self.rad_existing, self.rad_folder1004, self.rad_full):
+            mode_grp.addButton(rb)
+            mode_options.addWidget(rb)
         mc.addWidget(mode_options_wrap)
         outer.addWidget(mode_card)
 
@@ -602,12 +612,20 @@ class OrganizeView(QtWidgets.QWidget):
         except Exception:
             pass
         self.set_running(True)
-        if self.rad_add.isChecked():
-            mode = "additive"
-        elif self.rad_inc.isChecked():
-            mode = "incremental"
+        if self.rad_full.isChecked():
+            mode = ORGANIZE_MODE_FULL_REBUILD
+            QtWidgets.QMessageBox.warning(
+                self,
+                "모든 폴더 해체 후 재정리",
+                "주의: 이 방식은 하위 폴더 안의 파일까지 모두 꺼내 파일 단위로 다시 분류합니다.\n"
+                "기존 폴더명은 참고만 하며, 현재 폴더 구조는 유지되지 않습니다.",
+            )
+        elif self.rad_folder1004.isChecked():
+            mode = ORGANIZE_MODE_PRESERVE_FOLDER1004
+        elif self.rad_existing.isChecked():
+            mode = ORGANIZE_MODE_PRESERVE_EXISTING
         else:
-            mode = "new"
+            mode = ORGANIZE_MODE_BUNDLE_REBUILD
         self.start_requested.emit(
             path, self.chk_recursive.isChecked(),
             False, mode,

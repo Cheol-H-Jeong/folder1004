@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from ..config import Config, default_paths, load_config
+from ..config import Config, normalize_organize_mode, default_paths, load_config
 from ..index import IndexDB
 from ..worker import OrganizeWorker
 from .styles import resolve_qss
@@ -176,12 +176,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._thread is not None:
             return
         # Persist the chosen mode onto the live config so the pipeline
-        # picks it up.  ``incremental`` reuses existing top-level
-        # folders as the category catalogue; ``new`` ignores them and
-        # builds the catalogue from scratch.
-        self.config.organize_mode = (
-            mode if mode in ("new", "incremental", "additive") else "new"
-        )
+        # picks it up.  Legacy mode ids are normalized for old configs.
+        self.config.organize_mode = normalize_organize_mode(mode)
         # Open a fresh per-run log file so every Organize run is captured
         # with full INFO/DEBUG and tracebacks.
         from ..runlog import start_session

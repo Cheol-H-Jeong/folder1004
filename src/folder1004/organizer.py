@@ -16,7 +16,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
-from .config import Config
+from .config import (
+    Config,
+    ORGANIZE_MODE_FULL_REBUILD,
+    ORGANIZE_MODE_PRESERVE_EXISTING,
+    ORGANIZE_MODE_PRESERVE_FOLDER1004,
+    normalize_organize_mode,
+)
 from .models import (
     Assignment,
     Category,
@@ -419,18 +425,26 @@ class Organizer:
             key=lambda c: (c.group or 99, c.time_label or "~", c.name or c.id),
         )
 
-        # Map of normalized-name → existing folder Path.  We use this to
-        # reuse a pre-existing folder whose core name matches a planned
-        # category instead of creating a sibling with a slightly different
-        # group prefix or time suffix.  Pre-existing folders are also
-        # *renamed* to the canonical "N. name (period)" pattern so the
-        # whole target root ends up with consistent folder naming.
+        # Map of normalized-name → existing folder Path.  Exact seeded
+        # folders are always reused.  Fuzzy reuse is intentionally disabled
+        # when the plan moves directory bundles or fully rebuilds, otherwise a
+        # source folder can accidentally become the destination category and
+        # defeat the user's selected preservation/destruction boundary.
         existing_dirs = self._list_existing_dirs(target_root)
         protected_existing_dirs = {
             Path(c.existing_folder).resolve()
             for c in ordered
             if getattr(c, "existing_folder", "")
         }
+        mode = normalize_organize_mode(getattr(self.config, "organize_mode", ""))
+        has_directory_assignments = any(Path(a.file_path).is_dir() for a in plan.assignments)
+        allow_fuzzy_existing_reuse = (
+            not has_directory_assignments
+            and mode not in {
+                ORGANIZE_MODE_FULL_REBUILD,
+                ORGANIZE_MODE_PRESERVE_FOLDER1004,
+            }
+        )
 
         dir_for: dict[str, Path] = {}
         used_paths: set[Path] = set()
@@ -443,10 +457,28 @@ class Organizer:
             exact_existing = Path(cat.existing_folder).resolve() if cat.existing_folder else None
             if exact_existing is not None and exact_existing.exists() and exact_existing.is_dir():
                 chosen = exact_existing
+                should_stamp_plain_existing = (
+                    mode == ORGANIZE_MODE_PRESERVE_EXISTING
+                    and not is_folder1004_folder_name(chosen.name)
+                    and chosen.name != canonical
+                    and not canonical_path.exists()
+                )
+                if should_stamp_plain_existing:
+                    if not dry_run:
+                        try:
+                            chosen.rename(canonical_path)
+                            chosen = canonical_path
+                        except OSError as exc:
+                            log.warning(
+                                "stamp existing folder failed %s → %s: %s",
+                                chosen, canonical_path, exc,
+                            )
+                    else:
+                        chosen = canonical_path
             best_score = 0.0
-            if chosen is None:
+            if chosen is None and allow_fuzzy_existing_reuse:
                 for d in existing_dirs:
-                    if d in used_paths:
+                    if d in used_paths or d.resolve() in protected_existing_dirs:
                         continue
                     score = _fuzzy_match_score(_normalize_for_match(d.name), cat_core)
                     if score >= 0.85 and score > best_score:
@@ -487,6 +519,14 @@ class Organizer:
 
             used_paths.add(chosen)
             dir_for[cat.id] = chosen
+
+        # If an exact existing folder was stamped/renamed above, protect the
+        # actual final path from renumber/sweep passes.
+        protected_existing_dirs = {
+            dir_for[c.id].resolve()
+            for c in ordered
+            if getattr(c, "existing_folder", "") and c.id in dir_for
+        }
 
         created_dirs: set[Path] = set()
 
@@ -826,7 +866,7 @@ class Organizer:
                 raise KeyError(f"unknown category {assign.primary_category_id}")
         primary_dir = ensure_dir(cat_id)
 
-        # Skip move if the file is already sitting in the destination folder.
+        # Skip move if the item is already sitting in the destination folder.
         target_path = primary_dir / src.name
         if src.resolve() == target_path.resolve():
             return MovedFile(
@@ -838,6 +878,7 @@ class Organizer:
             )
 
         new_path = _unique_path(target_path)
+        is_dir_assignment = src.is_dir()
         if not dry_run:
             try:
                 shutil.move(str(src), str(new_path))
@@ -849,8 +890,10 @@ class Organizer:
                 shutil.move(str(src), str(new_path))
             except OSError as exc:
                 # Cross-device rename can fail on some filesystems even for
-                # shutil.move — fall back to an explicit copy + remove.
-                if getattr(exc, "errno", None) in (18, 39):  # EXDEV / ENOTEMPTY
+                # shutil.move — fall back to an explicit copy + remove for
+                # files.  Directory bundles are never copy-deleted here to
+                # avoid partial destructive moves.
+                if (not is_dir_assignment) and getattr(exc, "errno", None) in (18, 39):  # EXDEV / ENOTEMPTY
                     primary_dir.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(str(src), str(new_path))
                     try:
@@ -859,6 +902,15 @@ class Organizer:
                         pass
                 else:
                     raise
+
+        if is_dir_assignment:
+            return MovedFile(
+                original_path=src,
+                new_path=new_path,
+                category_id=cat_id,
+                reason=assign.reason,
+                score=assign.primary_score,
+            )
 
         shortcut_paths: list[Path] = []
         # Only create shortcuts for secondary categories whose score is close enough.

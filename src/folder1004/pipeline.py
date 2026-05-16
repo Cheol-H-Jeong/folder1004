@@ -13,7 +13,16 @@ import concurrent.futures as _futures
 import os
 import sys
 
-from .config import Config, default_paths, get_api_key
+from .config import (
+    Config,
+    ORGANIZE_MODE_BUNDLE_REBUILD,
+    ORGANIZE_MODE_FULL_REBUILD,
+    ORGANIZE_MODE_PRESERVE_EXISTING,
+    ORGANIZE_MODE_PRESERVE_FOLDER1004,
+    default_paths,
+    get_api_key,
+    normalize_organize_mode,
+)
 from .index import IndexDB
 from .llm import make_llm_client
 from .metadata import collect
@@ -132,6 +141,118 @@ def gather_entries(
     return entries
 
 
+def _top_level_child(root: Path, path: Path) -> Optional[Path]:
+    """Return the direct child of *root* containing *path*, if any."""
+    try:
+        rel = Path(path).resolve().relative_to(root.resolve())
+    except (OSError, ValueError):
+        return None
+    if len(rel.parts) <= 1:
+        return None
+    return root / rel.parts[0]
+
+
+def _folder_bundle_entry(folder: Path, members: list[FileEntry]) -> FileEntry:
+    """Represent a top-level folder as one classification item.
+
+    Bundle modes must not scatter files already grouped inside a folder.  The
+    planner still needs enough signal to pick a destination category, so this
+    pseudo entry summarizes the folder name, representative child paths, and a
+    compact excerpt sample while its ``path`` points at the directory to move.
+    """
+    from datetime import datetime, timezone
+
+    now = datetime.now(tz=timezone.utc).astimezone()
+    try:
+        st = folder.stat()
+        created = modified = accessed = now
+        try:
+            created = collect(folder).created
+        except Exception:
+            pass
+        modified = datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).astimezone()
+        accessed = datetime.fromtimestamp(st.st_atime, tz=timezone.utc).astimezone()
+    except OSError:
+        created = modified = accessed = now
+    if members:
+        size = sum(max(0, int(m.size or 0)) for m in members)
+        modified = max((m.modified for m in members), default=modified)
+        accessed = max((m.accessed for m in members), default=accessed)
+    else:
+        size = 0
+
+    samples: list[str] = []
+    for m in sorted(members, key=lambda e: str(e.path))[:24]:
+        try:
+            rel = m.path.relative_to(folder)
+        except ValueError:
+            rel = Path(m.name)
+        line = str(rel)
+        excerpt = (m.content_excerpt or "").strip().replace("\n", " ")
+        if excerpt:
+            line += f" — {excerpt[:140]}"
+        samples.append(line)
+    excerpt_body = "\n".join(samples)
+    content_excerpt = (
+        f"[폴더 묶음] 이 항목은 해체하지 말고 폴더째 이동해야 합니다.\n"
+        f"기존 폴더명: {folder.name}\n"
+        f"하위 파일 수: {len(members)}\n"
+        f"대표 파일:\n{excerpt_body}"
+    ).strip()
+    return FileEntry(
+        path=folder,
+        name=folder.name,
+        ext="[folder]",
+        size=size,
+        created=created,
+        modified=modified,
+        accessed=accessed,
+        mime="inode/directory",
+        content_excerpt=content_excerpt,
+    )
+
+
+def _entries_with_top_level_bundles(
+    target_root: Path,
+    entries: list[FileEntry],
+    *,
+    skip_folder1004_folders: bool = False,
+) -> tuple[list[FileEntry], int, int]:
+    """Collapse files under each direct child folder into one folder entry.
+
+    Returns ``(entries_for_planner, bundle_count, skipped_file_count)``.  Root
+    files remain file entries.  Files inside skipped Folder1004 folders are not
+    sent to the planner because those folders are preserved as already sorted.
+    """
+    from .organizer import is_folder1004_folder_name
+
+    root_entries: list[FileEntry] = []
+    by_folder: dict[Path, list[FileEntry]] = {}
+    skipped = 0
+    for e in entries:
+        top = _top_level_child(target_root, e.path)
+        if top is None:
+            root_entries.append(e)
+            continue
+        if skip_folder1004_folders and is_folder1004_folder_name(top.name):
+            skipped += 1
+            continue
+        by_folder.setdefault(top, []).append(e)
+    bundles = [_folder_bundle_entry(folder, members) for folder, members in sorted(by_folder.items(), key=lambda kv: kv[0].name)]
+    return root_entries + bundles, len(bundles), skipped
+
+
+def _root_file_entries_only(target_root: Path, entries: list[FileEntry]) -> tuple[list[FileEntry], int]:
+    kept: list[FileEntry] = []
+    skipped = 0
+    for e in entries:
+        if _top_level_child(target_root, e.path) is None:
+            kept.append(e)
+        else:
+            skipped += 1
+    return kept, skipped
+
+
 def run(
     target_root: Path,
     config: Config,
@@ -149,9 +270,21 @@ def run(
             raise RuntimeError("canceled by user")
 
     _check()
-    entries = gather_entries(target_root, config, recursive, progress, cancel_check)
+    mode = normalize_organize_mode(getattr(config, "organize_mode", ""))
+    config.organize_mode = mode
+
+    # The folder-handling modes define whether subfolders are inspected.  The
+    # safe default modes need recursive metadata so top-level folders can be
+    # summarized as intact bundles; the only mode that truly dissolves folders
+    # is full_rebuild.
+    scan_recursive = recursive or mode in {
+        ORGANIZE_MODE_BUNDLE_REBUILD,
+        ORGANIZE_MODE_PRESERVE_FOLDER1004,
+        ORGANIZE_MODE_FULL_REBUILD,
+    }
+    entries = gather_entries(target_root, config, scan_recursive, progress, cancel_check)
     _check()
-    folder_profile = analyze_folder_profile(target_root, entries, recursive=recursive)
+    folder_profile = analyze_folder_profile(target_root, entries, recursive=scan_recursive)
     if progress:
         progress(
             f"profile: {folder_profile.label} · 건강 점수 {folder_profile.health_score}/100 "
@@ -160,69 +293,53 @@ def run(
         )
 
     # ------------------------------------------------------------------
-    # Mode resolution.  The UI describes these as existing-folder handling
-    # choices: all folders rebuilt, existing folders kept, or only signed
-    # Folder1004 folders kept.  The persisted mode ids stay stable for
-    # backwards compatibility.
+    # Mode resolution.
     # ------------------------------------------------------------------
-    mode = (getattr(config, "organize_mode", "") or "").lower()
-    if mode not in ("new", "incremental", "additive"):
-        mode = "new"
-    config.reclassify_mode = True
+    # Only the explicit danger mode hides parent paths and classifies every
+    # file independently.  The three safer modes preserve existing folder
+    # interiors and therefore expose folder names as normal classification
+    # signals.
+    config.reclassify_mode = mode == ORGANIZE_MODE_FULL_REBUILD
 
     seed_categories: list[dict] = []
-    if mode == "incremental":
-        # 기존 폴더 유지하기 — 기존 최상위 폴더 *전체* 를 카테고리로 활용.
-        seed_categories = _seed_categories_from_disk(target_root, fa_only=False)
+    if mode == ORGANIZE_MODE_BUNDLE_REBUILD:
+        entries, bundle_count, _skipped = _entries_with_top_level_bundles(target_root, entries)
         if progress:
             progress(
-                f"plan: 기존 폴더 유지하기 — 기존 폴더 {len(seed_categories)}개를 카테고리로 활용",
+                f"plan: 새 폴더 체계로 정리 — 기존 하위 폴더 {bundle_count}개를 해체하지 않고 묶음으로 분류",
                 0.06,
             )
-    elif mode == "additive":
-        # Folder1004로 이미 생성한 폴더만 유지하기 — Folder1004가 만들어준 폴더만 카테고리로 활용.
-        # 그 안의 파일들은 이미 분류된 것으로 간주, 재분류 안 함.
-        # 외부에 떨어진 새 파일들만 Folder1004 폴더(혹은 신규 폴더)로 보냄.
+    elif mode == ORGANIZE_MODE_PRESERVE_EXISTING:
+        # 기존 폴더 체계 유지 — 기존 최상위 폴더 전체를 카테고리로 활용하고,
+        # 루트에 흩어진 파일만 기존/신규 폴더로 보낸다.
+        seed_categories = _seed_categories_from_disk(target_root, fa_only=False)
+        entries, skipped_nested = _root_file_entries_only(target_root, entries)
+        if progress:
+            progress(
+                f"plan: 기존 폴더 체계 유지 — 기존 폴더 {len(seed_categories)}개 활용 / "
+                f"하위 폴더 내부 파일 {skipped_nested}개 보존 / 새 분류 대상 {len(entries)}개",
+                0.06,
+            )
+    elif mode == ORGANIZE_MODE_PRESERVE_FOLDER1004:
+        # Folder1004 폴더만 유지 — signed folders are kept untouched;
+        # unsigned folders are moved as intact bundles, not dissolved.
         seed_categories = _seed_categories_from_disk(target_root, fa_only=True)
-        from .organizer import is_folder1004_folder_name
-        folder1004_paths: list[Path] = []
-        if target_root.is_dir():
-            for d in target_root.iterdir():
-                if d.is_dir() and is_folder1004_folder_name(d.name):
-                    folder1004_paths.append(d.resolve())
-        # Drop any entry whose absolute path lies inside a Folder1004 folder.
-        if folder1004_paths:
-            kept: list[FileEntry] = []
-            skipped_in_folder1004 = 0
-            for e in entries:
-                try:
-                    rp = Path(e.path).resolve()
-                except OSError:
-                    rp = Path(e.path)
-                # Use string-prefix match — a child of a tagged dir starts
-                # with its directory + os.sep.
-                if any(
-                    str(rp).startswith(str(folder1004) + ("/" if "/" in str(folder1004) else "\\"))
-                    or str(rp) == str(folder1004)
-                    for folder1004 in folder1004_paths
-                ):
-                    skipped_in_folder1004 += 1
-                    continue
-                kept.append(e)
-            entries = kept
-            if progress:
-                progress(
-                    f"plan: Folder1004로 이미 생성한 폴더만 유지하기 — 기존 Folder1004 폴더 {len(folder1004_paths)}개 / "
-                    f"이미 분류된 파일 {skipped_in_folder1004}개 건너뜀 / "
-                    f"새 분류 대상 {len(entries)}개",
-                    0.06,
-                )
-        else:
-            if progress:
-                progress(
-                    "plan: Folder1004로 이미 생성한 폴더만 유지하기 — Folder1004 시그니처 폴더가 없어 신규 분류처럼 동작",
-                    0.06,
-                )
+        entries, bundle_count, skipped_in_folder1004 = _entries_with_top_level_bundles(
+            target_root, entries, skip_folder1004_folders=True
+        )
+        if progress:
+            progress(
+                f"plan: Folder1004 폴더만 유지 — 기존 Folder1004 폴더 {len(seed_categories)}개 / "
+                f"이미 분류된 파일 {skipped_in_folder1004}개 건너뜀 / "
+                f"일반 하위 폴더 {bundle_count}개는 묶음으로 분류 / 새 분류 대상 {len(entries)}개",
+                0.06,
+            )
+    elif mode == ORGANIZE_MODE_FULL_REBUILD:
+        if progress:
+            progress(
+                "plan: 모든 폴더 해체 후 재정리 — 기존 폴더명은 참고 힌트로만 사용",
+                0.06,
+            )
 
     # ------------------------------------------------------------------
     # Duplicate detection: skip the LLM round-trip for non-canonical

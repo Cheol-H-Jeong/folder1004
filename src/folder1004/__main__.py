@@ -18,7 +18,7 @@ if __package__ in (None, ""):
 
 
 def _run_cli(args) -> int:
-    from .config import default_paths, load_config
+    from .config import default_paths, load_config, normalize_organize_mode
     from .index import IndexDB
     from .pipeline import run
     from .runlog import start_session
@@ -43,6 +43,8 @@ def _run_cli(args) -> int:
         config.model = args.model
     if args.reasoning:
         config.reasoning_mode = args.reasoning
+    if args.mode:
+        config.organize_mode = normalize_organize_mode(args.mode)
     force_mock = bool(args.mock)
     db = IndexDB(paths.index_db)
 
@@ -109,6 +111,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--recursive", action="store_true", help="include subfolders")
     parser.add_argument("--dry-run", action="store_true", help="plan without moving files")
     parser.add_argument("--mock", action="store_true", help="force mock planner")
+    parser.add_argument(
+        "--mode",
+        choices=[
+            "bundle_rebuild",
+            "preserve_existing",
+            "preserve_folder1004",
+            "full_rebuild",
+            "new",
+            "incremental",
+            "additive",
+        ],
+        help="folder handling mode for --cli (default: saved config or bundle_rebuild)",
+    )
     parser.add_argument(
         "--no-economy",
         action="store_true",
