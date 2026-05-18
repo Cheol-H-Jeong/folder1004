@@ -947,7 +947,14 @@ class Planner:
 
         # ---------- Stage B ----------
         categories_payload = [
-            {"id": c["id"], "name": c.get("name", c["id"]), "description": c.get("description", "")}
+            {
+                "id": c["id"],
+                "name": c.get("name", c["id"]),
+                "description": c.get("description", ""),
+                "group": c.get("group"),
+                "time_label": c.get("time_label", ""),
+                "duration": c.get("duration", ""),
+            }
             for c in categories_raw
         ]
         category_ids = {c["id"] for c in categories_payload}
@@ -1717,16 +1724,54 @@ def _plan_from_dict(
     by_path = {str(e.path): e for e in entries}
     from .llm.client import _looks_like_mojibake, _try_repair_mojibake
 
+    catchall_keywords = ("기타", "그 외", "분류되지 않은", "프로젝트 외", "기타 자료")
+    used_groups: set[int] = set()
+    for c in data.get("categories", []):
+        try:
+            raw_group = int(c.get("group", 0) or 0)
+        except (TypeError, ValueError):
+            raw_group = 0
+        raw_id = str(c.get("id") or "").strip()
+        raw_name_for_group = str(c.get("name") or c.get("id") or "").strip()
+        is_catchall_for_group = (
+            raw_id == "misc"
+            or any(k in raw_name_for_group for k in catchall_keywords)
+        )
+        if 1 <= raw_group <= 998 or (raw_group == 999 and is_catchall_for_group):
+            used_groups.add(raw_group)
+
+    next_group = 1
+
+    def _next_category_group() -> int:
+        nonlocal next_group
+        while next_group in used_groups and next_group < 999:
+            next_group += 1
+        if next_group >= 999:
+            return 998
+        value = next_group
+        used_groups.add(value)
+        next_group += 1
+        return value
+
     cats: list[Category] = []
     for c in data.get("categories", []):
         try:
             group_val = int(c.get("group", 0) or 0)
         except (TypeError, ValueError):
             group_val = 0
-        if group_val < 1 or group_val > 999:
-            group_val = 999
         raw_name = str(c.get("name") or c.get("id") or "").strip()
         raw_desc = str(c.get("description", "") or "")
+        is_catchall = (
+            str(c.get("id") or "").strip() == "misc"
+            or any(k in raw_name for k in catchall_keywords)
+        )
+        if is_catchall:
+            group_val = 999
+        elif group_val < 1 or group_val >= 999:
+            # Missing model/mock groups should not collapse every real
+            # category under 999.  Assign stable 001, 002, ... groups so
+            # only intentionally related categories share a prefix.
+            group_val = _next_category_group()
 
         # Per-field mojibake detection + best-effort repair.  This must be
         # strict because only a single category may be corrupt in an
@@ -1774,7 +1819,6 @@ def _plan_from_dict(
     # Collapse any LLM-supplied catch-all category to a single canonical
     # "기타" bucket so we never end up with both "기타", "프로젝트 외
     # 자료", and "기타 (2)" living side-by-side.
-    catchall_keywords = ("기타", "그 외", "분류되지 않은", "프로젝트 외", "기타 자료")
     canonical: list[Category] = []
     misc_seen = False
     for c in cats:

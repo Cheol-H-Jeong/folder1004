@@ -21,3 +21,8 @@ def test_mock_plan_groups_by_extension():
     cat_ids = {c["id"] for c in out["categories"]}
     for a in out["assignments"]:
         assert a["primary"] in cat_ids
+    for c in out["categories"]:
+        if c["id"] == "misc":
+            assert c["group"] == 999
+        else:
+            assert 1 <= c["group"] < 999

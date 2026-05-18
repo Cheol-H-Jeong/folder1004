@@ -161,6 +161,13 @@ def plan(files: Iterable[dict], ambiguity_threshold: float = 0.15) -> dict:
     final_counts = Counter(a["primary"] for a in assignments)
     ordered_ids = [cid for cid, _ in final_counts.most_common()]
     categories = [category_buckets[cid] for cid in ordered_ids if cid in category_buckets][:12]
+    next_group = 1
+    for c in categories:
+        if c.get("id") == "misc":
+            c["group"] = 999
+        else:
+            c["group"] = next_group
+            next_group += 1
 
     # Drop assignments whose primary id did not survive.
     surviving = {c["id"] for c in categories}
@@ -168,7 +175,7 @@ def plan(files: Iterable[dict], ambiguity_threshold: float = 0.15) -> dict:
         if a["primary"] not in surviving:
             a["primary"] = "misc"
             if not any(c["id"] == "misc" for c in categories):
-                categories.append({"id": "misc", "name": "기타", "description": "기타 파일"})
+                categories.append({"id": "misc", "name": "기타", "description": "기타 파일", "group": 999})
                 surviving.add("misc")
 
     return {"categories": categories, "assignments": assignments}
