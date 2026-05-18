@@ -7,7 +7,7 @@
 ; ``dist\folder1004\folder1004.exe`` and its supporting bundle.
 
 #define AppName "Folder1004"
-#define AppVersion "1.0.6"
+#define AppVersion "1.0.7"
 #define AppPublisher "Folder1004"
 #define AppExeName "folder1004.exe"
 

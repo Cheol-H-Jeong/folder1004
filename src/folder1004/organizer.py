@@ -163,6 +163,35 @@ _META_NOISE = {
 }
 
 
+def _year_tokens(text: str) -> set[str]:
+    """Return normalized year/date tokens so ``2024`` and ``2024년`` match."""
+    years = {m.group(1) for m in re.finditer(r"\b(19\d{2}|20\d{2}|21\d{2})\s*년?\b", text or "")}
+    # Keep compact month/quarter labels from being repeated as metadata too.
+    years.update(
+        m.group(0).casefold()
+        for m in re.finditer(
+            r"\b(?:19\d{2}|20\d{2}|21\d{2})(?:[-_.]?(?:q[1-4]|h[12]|\d{1,2}))?\b",
+            text or "",
+            flags=re.I,
+        )
+    )
+    return years
+
+
+def _time_label_already_visible(name: str, label: str) -> bool:
+    """True if the category name already carries the visible time label."""
+    name_norm = (name or "").casefold()
+    label_norm = (label or "").strip().casefold()
+    if not label_norm:
+        return True
+    compact_name = re.sub(r"[\s._()〈〉~–—-]+", "", name_norm)
+    compact_label = re.sub(r"[\s._()〈〉~–—-]+", "", label_norm)
+    if compact_label and compact_label in compact_name:
+        return True
+    label_years = _year_tokens(label_norm)
+    return bool(label_years and label_years <= _year_tokens(name_norm))
+
+
 def _folder_metadata_suffix(cat: Category) -> str:
     """Compact searchable terms appended to new Folder1004 folder names.
 
@@ -174,6 +203,7 @@ def _folder_metadata_suffix(cat: Category) -> str:
     if getattr(cat, "existing_folder", ""):
         return ""
     base = f"{cat.name or ''} {cat.time_label or ''}".casefold()
+    visible_years = _year_tokens(base)
     terms: list[str] = []
     seen: set[str] = set()
     for src in (cat.description or "", cat.time_label or ""):
@@ -183,6 +213,9 @@ def _folder_metadata_suffix(cat: Category) -> str:
                 continue
             norm = tok.casefold()
             if norm in seen or norm in _META_NOISE or norm in base:
+                continue
+            tok_years = _year_tokens(norm)
+            if tok_years and tok_years <= visible_years:
                 continue
             # Do not leak implementation-ish hash fragments into names.
             if re.fullmatch(r"[a-f0-9]{6,}", norm):
@@ -228,7 +261,7 @@ def compose_folder_name(cat: Category, fallback_group: int = 999) -> str:
     label = (cat.time_label or "").strip()
     duration = (cat.duration or "").strip().lower()
     pieces: list[str] = [f"{g:03d}.", cat.name or cat.id]
-    if label:
+    if label and not _time_label_already_visible(cat.name or cat.id, label):
         if duration == "multi-year" or _looks_multiyear(label):
             # Visual cue that this folder spans multiple years.
             pieces.append(f"〈{label}〉")

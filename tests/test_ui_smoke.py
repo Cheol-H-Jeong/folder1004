@@ -500,3 +500,36 @@ def test_icon_assets_and_packaging_references_exist():
     iss = (root / "scripts" / "folder1004.iss").read_text(encoding="utf-8")
     assert "SetupIconFile=..\\assets\\icon.ico" in iss
     assert "IconFilename" in iss
+
+
+def test_open_report_uses_recorded_report_path_after_preview_apply(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    from folder1004.config import Config
+    from folder1004.models import OperationResult
+    from folder1004.ui.views import OrganizeView
+    import folder1004.ui.views as views
+
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    report = tmp_path / "Folder1004_Report_actual.md"
+    report.write_text("report", encoding="utf-8")
+    mismatched_stamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    op = OperationResult(
+        target_root=tmp_path,
+        started_at=mismatched_stamp,
+        finished_at=mismatched_stamp,
+        dry_run=False,
+        categories=[],
+        moved=[],
+        skipped=[],
+        total_scanned=0,
+    )
+    op.report_path = report
+    opened = []
+    monkeypatch.setattr(views, "_open_in_explorer", lambda p: opened.append(Path(p)))
+
+    view = OrganizeView(Config())
+    view.on_finished(op)
+    view._open_report()
+
+    assert opened == [report]
+    view.close()

@@ -158,6 +158,36 @@ def test_compose_folder_name_per_duration():
     assert folder1004.search(compose_folder_name(mixed))
 
 
+def test_compose_folder_name_does_not_duplicate_visible_year_metadata():
+    from folder1004.organizer import compose_folder_name
+
+    already_named = Category(
+        id="annual-2024",
+        name="행안부 범정부 AI 2024",
+        description="행안부 2024년 사업 보고서",
+        group=1,
+        time_label="2024",
+        duration="annual",
+    )
+    name = compose_folder_name(already_named)
+    assert "(2024)" not in name
+    assert "2024년" not in name
+    assert name.count("2024") == 1
+
+    suffixed = Category(
+        id="annual-suffix",
+        name="행안부 범정부 AI",
+        description="행안부 2024년 사업 보고서",
+        group=2,
+        time_label="2024",
+        duration="annual",
+    )
+    name2 = compose_folder_name(suffixed)
+    assert "(2024)" in name2
+    assert "2024년" not in name2
+    assert name2.count("2024") == 1
+
+
 def test_existing_folder_with_same_core_name_is_reused(tmp_path):
     pre_existing = tmp_path / "AVOCA 시스템"
     pre_existing.mkdir()

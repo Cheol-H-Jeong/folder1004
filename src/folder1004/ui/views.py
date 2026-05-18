@@ -995,11 +995,27 @@ class OrganizeView(QtWidgets.QWidget):
 
     def _open_report(self):
         if self._last_op:
-            # The reporter writes to target_root/Folder1004_Report_*.md
-            stamp = self._last_op.finished_at.strftime("%Y%m%d_%H%M%S")
-            p = self._last_op.target_root / f"Folder1004_Report_{stamp}.md"
-            if p.exists():
-                _open_in_explorer(p)
+            explicit = getattr(self._last_op, "report_path", None)
+            if explicit:
+                p = Path(explicit)
+                if p.exists():
+                    _open_in_explorer(p)
+                    return
+            # Fallback for older in-memory OperationResult objects: the
+            # reporter writes to target_root/Folder1004_Report_*.md.  Use a
+            # glob instead of reconstructing from timestamps so preview→apply
+            # runs still open the report even if the timestamp differs by a
+            # second or the path was not persisted in a legacy object.
+            try:
+                candidates = sorted(
+                    self._last_op.target_root.glob("Folder1004_Report_*.md"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                if candidates:
+                    _open_in_explorer(candidates[0])
+            except Exception:
+                pass
 
 
 class SearchView(QtWidgets.QWidget):
