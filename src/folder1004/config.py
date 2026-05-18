@@ -278,7 +278,7 @@ class Config:
     ambiguity_threshold: float = 0.15
     max_excerpt_chars: int = 1800
     parse_timeout_s: float = 5.0
-    recursive_default: bool = False
+    recursive_default: bool = True
     include_hidden: bool = False
     language: str = "ko"
     appearance: str = "auto"  # auto | light | dark
@@ -355,20 +355,21 @@ class Config:
     reclassify_mode: bool = False
 
     # User-facing organize mode chosen on the start screen:
-    #   "bundle_rebuild"       새 폴더 체계로 정리 — keep each existing
-    #                          top-level folder intact as a bundle, then move
-    #                          those bundles into a newly planned Folder1004
-    #                          category structure.  Legacy id: "new".
-    #   "preserve_existing"    기존 폴더 체계 유지 — keep all existing
-    #                          top-level folders as the catalogue and add only
-    #                          missing folders.  Legacy id: "incremental".
-    #   "preserve_folder1004"  Folder1004 폴더만 유지 — keep only signed
-    #                          Folder1004 folders, and re-sort new loose
-    #                          files/plain folders as intact bundles.
-    #                          Legacy id: "additive".
-    #   "full_rebuild"         모든 폴더 해체 후 재정리 — dissolve all
-    #                          folders and classify every file individually,
-    #                          using old folder names only as weak hints.
+    #   "bundle_rebuild"       새 폴더 체계로 정리 — only the current
+    #                          1-depth top-level folders are reorganized as
+    #                          intact bundles under a new Folder1004 folder
+    #                          structure.  Legacy id: "new".
+    #   "preserve_existing"    기존 폴더 체계 유지 — only the current
+    #                          1-depth top-level folders are used as the
+    #                          catalogue and missing folders are added.
+    #                          Legacy id: "incremental".
+    #   "preserve_folder1004"  Folder1004 폴더만 유지 — only signed
+    #                          Folder1004 1-depth folders are kept, and new
+    #                          loose files/plain folders are sorted as intact
+    #                          bundles.  Legacy id: "additive".
+    #   "full_rebuild"         모든 폴더 해체 후 재정리 — recursively dissolve
+    #                          every subfolder and classify every file
+    #                          individually, using old folder names as hints.
     organize_mode: str = ORGANIZE_MODE_BUNDLE_REBUILD
 
     # Duplicate-file dedup threshold (bytes).  When ≥ 2 files share

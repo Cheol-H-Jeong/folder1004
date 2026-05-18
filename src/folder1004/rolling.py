@@ -329,7 +329,7 @@ ROLLING_INSTRUCTION = """응답 JSON 스키마(엄격, 다른 텍스트 금지):
   ]
 }}
 duration ∈ {{burst, short, annual, multi-year, mixed}}.
-group 은 1~9 정수 (잡파일=9).
+group 은 1~999 정수 (잡파일=999).
 primary_score("p")<{ambiguity_threshold} 인 모호 파일은 c="misc" 로 보내라.
 """
 

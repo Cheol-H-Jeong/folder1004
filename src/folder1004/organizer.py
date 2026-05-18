@@ -100,7 +100,7 @@ def sanitize_folder_name(name: str, fallback: str = "folder") -> str:
     return cleaned[:120]
 
 
-_GROUP_PREFIX_RE = re.compile(r"^\s*(\d)\.\s+")
+_GROUP_PREFIX_RE = re.compile(r"^\s*(\d{1,4})\.\s+")
 _TIME_SUFFIX_RE = re.compile(r"\s*\([^()]+\)\s*$")
 
 
@@ -143,6 +143,8 @@ def parse_fa_folder_name(name: str) -> Optional[dict]:
         return None
     sig = m.group(1)
     core = name[: m.start()].rstrip()
+    if " — " in core:
+        core = core.split(" — ", 1)[0].rstrip()
     # strip trailing period suffix "(2024-Q1)" or "〈2023–2025〉"
     period = ""
     pm = re.search(r"[\s]*[\(〈]([^)〉]{1,30})[\)〉]\s*$", core)
@@ -154,11 +156,51 @@ def parse_fa_folder_name(name: str) -> Optional[dict]:
     return {"clean_name": core, "period": period, "signature": sig}
 
 
-def compose_folder_name(cat: Category, fallback_group: int = 9) -> str:
+_META_TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣][0-9A-Za-z가-힣._-]*")
+_META_NOISE = {
+    "기존", "폴더", "분류", "문서", "파일", "자료", "관련", "기타",
+    "mixed", "burst", "short", "annual", "multi", "year",
+}
+
+
+def _folder_metadata_suffix(cat: Category) -> str:
+    """Compact searchable terms appended to new Folder1004 folder names.
+
+    The visible category name stays primary, but users also search folders by
+    institution/project/year/domain terms that often live in description or
+    time metadata.  Seeded existing folders are excluded so preserve modes do
+    not rewrite a user's curated folder names with generated metadata.
+    """
+    if getattr(cat, "existing_folder", ""):
+        return ""
+    base = f"{cat.name or ''} {cat.time_label or ''}".casefold()
+    terms: list[str] = []
+    seen: set[str] = set()
+    for src in (cat.description or "", cat.time_label or ""):
+        for raw in _META_TOKEN_RE.findall(src):
+            tok = raw.strip("._- ")
+            if len(tok) < 2:
+                continue
+            norm = tok.casefold()
+            if norm in seen or norm in _META_NOISE or norm in base:
+                continue
+            # Do not leak implementation-ish hash fragments into names.
+            if re.fullmatch(r"[a-f0-9]{6,}", norm):
+                continue
+            terms.append(tok)
+            seen.add(norm)
+            if len(terms) >= 6:
+                break
+        if len(terms) >= 6:
+            break
+    return (" — " + " ".join(terms)) if terms else ""
+
+
+def compose_folder_name(cat: Category, fallback_group: int = 999) -> str:
     """Build the on-disk folder name from a :class:`Category`.
 
-    Convention: ``"{group}. {name} {time-suffix}"`` — every category
-    gets a 1..9 group prefix, and the time-suffix shape is chosen by
+    Convention: ``"{group:03d}. {name} {time-suffix}"`` — every category
+    gets a 001..999 grouping prefix, and the time-suffix shape is chosen by
     the LLM-supplied ``duration`` so multi-year programmes look
     different from a single-month sprint::
 
@@ -172,20 +214,20 @@ def compose_folder_name(cat: Category, fallback_group: int = 9) -> str:
 
         Category(name="AVOCA 시스템",                 group=2,
                  time_label="2024-Q3",  duration="short")
-            → "2. AVOCA 시스템 (2024-Q3)"
+            → "002. AVOCA 시스템 (2024-Q3)"
 
         Category(name="범정부 초거대 AI 공통기반",      group=1,
                  time_label="2023–2025", duration="multi-year")
-            → "1. 범정부 초거대 AI 공통기반 〈2023–2025〉"
+            → "001. 범정부 초거대 AI 공통기반 〈2023–2025〉"
 
         Category(name="기타", group=9, time_label="", duration="mixed")
-            → "9. 기타"
+            → "009. 기타"
     """
     raw = int(cat.group or 0)
-    g = raw if 1 <= raw <= 9 else max(1, min(9, fallback_group))
+    g = raw if 1 <= raw <= 999 else max(1, min(999, fallback_group))
     label = (cat.time_label or "").strip()
     duration = (cat.duration or "").strip().lower()
-    pieces: list[str] = [f"{g}.", cat.name or cat.id]
+    pieces: list[str] = [f"{g:03d}.", cat.name or cat.id]
     if label:
         if duration == "multi-year" or _looks_multiyear(label):
             # Visual cue that this folder spans multiple years.
@@ -195,7 +237,7 @@ def compose_folder_name(cat: Category, fallback_group: int = 9) -> str:
     # Sanitiser runs before the Folder1004 tag is appended — its anti-JSON
     # filter would otherwise strip the trailing ``]`` of ``[Folder1004·xxx]``
     # because that bracket pattern looks like a stray JSON token.
-    base = sanitize_folder_name(" ".join(pieces))
+    base = sanitize_folder_name(" ".join(pieces) + _folder_metadata_suffix(cat))
     sig = folder_signature(cat.id or cat.name or "")
     # Cap the combined name to 120 chars too — leave room for the
     # ~14-char signature suffix.
@@ -408,13 +450,13 @@ class Organizer:
         target_root = Path(target_root).resolve()
         started_at = datetime.now().astimezone()
 
-        # Defensive: force every category to carry a 1..9 group number,
+        # Defensive: force every category to carry a 1..999 group number,
         # even if the LLM (or the mock planner) returned 0/None.  We assign
-        # missing groups to 9 (catch-all bucket) so the resulting folders
-        # always end up with a "{n}." prefix.
+        # missing groups to 999 (catch-all bucket) so the resulting folders
+        # always end up with a "{nnn}." prefix.
         for c in plan.categories:
-            if not (1 <= int(c.group or 0) <= 9):
-                c.group = 9
+            if not (1 <= int(c.group or 0) <= 999):
+                c.group = 999
 
         # Pre-compute safe folder paths for each category id, but *defer*
         # directory creation until we actually place a file (so empty
@@ -422,7 +464,7 @@ class Organizer:
         # the on-disk order reflects the LLM's relevance grouping.
         ordered = sorted(
             plan.categories,
-            key=lambda c: (c.group or 99, c.time_label or "~", c.name or c.id),
+            key=lambda c: (c.group or 999, c.time_label or "~", c.name or c.id),
         )
 
         # Map of normalized-name → existing folder Path.  Exact seeded
@@ -709,10 +751,10 @@ class Organizer:
 
     # -----------------------------------------------------------------
     def _renumber_unnumbered(self, root: Path, protected: Optional[set[Path]] = None) -> None:
-        """Force every direct child folder to start with ``"N. "``.
+        """Force every direct child folder to start with ``"NNN. "``.
 
         Folders that already match ``_GROUP_PREFIX_RE`` are left alone.
-        For unnumbered folders we prepend ``"9. "`` (the catch-all bucket)
+        For unnumbered folders we prepend ``"999. "`` (the catch-all bucket)
         and dedupe via the same ``(N)`` suffix scheme used for moves.
         """
         from .llm.client import _looks_like_mojibake
@@ -748,7 +790,7 @@ class Organizer:
 
             if has_group_prefix(current.name):
                 continue
-            new_name = sanitize_folder_name(f"9. {current.name}")
+            new_name = sanitize_folder_name(f"999. {current.name}")
             target = root / new_name
             counter = 2
             while target.exists() and target != current:
@@ -761,7 +803,7 @@ class Organizer:
 
     def _handle_mojibake_dir(self, root: Path, current: Path) -> None:
         """Quarantine a pre-existing mojibake folder name into a single
-        "9. 기타" bucket.  We never produce ``"기타 (2)"`` style siblings —
+        "999. 기타" bucket.  We never produce ``"기타 (2)"`` style siblings —
         the user explicitly wants exactly one misc folder, no matter how
         many corrupt names we collapse.
         """
@@ -779,11 +821,11 @@ class Organizer:
             return
 
         # Non-empty: merge contents into the single canonical 기타 folder.
-        misc = root / "9. 기타"
+        misc = root / "999. 기타"
         try:
             misc.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            log.warning("could not create 9. 기타: %s", exc)
+            log.warning("could not create 999. 기타: %s", exc)
             return
         for child in children:
             dest = misc / child.name
@@ -797,7 +839,7 @@ class Organizer:
             try:
                 shutil.move(str(child), str(dest))
             except OSError as exc:
-                log.warning("could not merge %s into 9. 기타: %s", child, exc)
+                log.warning("could not merge %s into 999. 기타: %s", child, exc)
         try:
             current.rmdir()
         except OSError:

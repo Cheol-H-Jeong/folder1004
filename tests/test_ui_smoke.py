@@ -419,3 +419,84 @@ def test_guidance_tags_do_not_overlap_custom_text_box():
     assert tag_bottom < edit_top
     assert not hasattr(view, "classification_preset_area")
     view.close()
+
+
+def test_recursive_is_always_on_and_actions_are_split(tmp_path, monkeypatch):
+    from folder1004.config import Config
+    from folder1004.ui.views import OrganizeView
+
+    target = tmp_path / "target"
+    target.mkdir()
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    view = OrganizeView(Config())
+    view.path_bar.set_path(str(target))
+
+    assert view.chk_recursive.isChecked()
+    assert not view.chk_recursive.isEnabled()
+    assert view.btn_preview.text() == "분석 후 미리보기"
+    assert view.btn_primary.text() == "바로 끝까지 정리"
+
+    seen = []
+    view.start_requested.connect(lambda *args: seen.append(args))
+    view._on_start("preview")
+    assert seen[-1][1] is True
+    assert seen[-1][2] is True
+    assert seen[-1][4] == "preview"
+    view.set_running(False)
+    view._on_start("run")
+    assert seen[-1][1] is True
+    assert seen[-1][2] is False
+    assert seen[-1][4] == "run"
+    view.close()
+
+
+def test_preview_dialog_reassignment_and_orphan_fallback(tmp_path):
+    from datetime import datetime, timezone
+    from folder1004.models import Category, MovedFile, OperationResult
+    from folder1004.ui.views import PreviewPlanDialog
+
+    a = tmp_path / "a.txt"
+    b = tmp_path / "b.txt"
+    a.write_text("a")
+    b.write_text("b")
+    cats = [Category(id="alpha", name="Alpha"), Category(id="beta", name="Beta")]
+    op = OperationResult(
+        target_root=tmp_path,
+        started_at=datetime.now(tz=timezone.utc),
+        finished_at=datetime.now(tz=timezone.utc),
+        dry_run=True,
+        categories=cats,
+        moved=[
+            MovedFile(a, tmp_path / "Alpha" / "a.txt", "alpha", score=0.7),
+            MovedFile(b, tmp_path / "Beta" / "b.txt", "beta", score=0.8),
+        ],
+        skipped=[],
+        total_scanned=2,
+    )
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    dlg = PreviewPlanDialog(op)
+    alpha = dlg.tree.topLevelItem(0)
+    beta = dlg.tree.topLevelItem(1)
+    child_a = alpha.takeChild(0)
+    beta.addChild(child_a)
+    # Simulate an awkward top-level drop: b.txt must not disappear from plan.
+    child_b = beta.takeChild(0)
+    dlg.tree.addTopLevelItem(child_b)
+
+    plan = dlg.to_plan()
+    by_path = {str(a.file_path): a.primary_category_id for a in plan.assignments}
+    assert by_path[str(a)] == "beta"
+    assert by_path[str(b)] == "beta"
+    assert {c.id for c in plan.categories} == {"beta"}
+    dlg.close()
+
+
+def test_icon_assets_and_packaging_references_exist():
+    root = Path(__file__).resolve().parents[1]
+    assert (root / "assets" / "icon.png").is_file()
+    assert (root / "assets" / "icon.ico").is_file()
+    spec = (root / "scripts" / "folder1004.spec").read_text(encoding="utf-8")
+    assert "icon.ico" in spec and "datas=[(str(ROOT / \"assets\"), \"assets\")]" in spec
+    iss = (root / "scripts" / "folder1004.iss").read_text(encoding="utf-8")
+    assert "SetupIconFile=..\\assets\\icon.ico" in iss
+    assert "IconFilename" in iss

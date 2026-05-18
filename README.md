@@ -125,13 +125,13 @@ any LLM call.
 ## CLI
 
 ```
-folder1004 --cli --path ~/Downloads --recursive --dry-run
+folder1004 --cli --path ~/Downloads --dry-run
 folder1004 --cli --path /work/docs --provider openai_compat \
             --base-url http://localhost:11434/v1 --model qwen2.5 \
             --reasoning off
 ```
 
-Flags: `--path PATH` `--recursive` `--dry-run` `--mock`
+Flags: `--path PATH` `--recursive`(always-on compatibility flag) `--dry-run` `--mock`
 `--no-economy` `--provider {gemini,openai_compat}` `--base-url URL`
 `--model NAME` `--reasoning {off,on,auto}` `--quiet`.
 

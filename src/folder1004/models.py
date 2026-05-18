@@ -50,7 +50,7 @@ class Category:
     #   "multi-year" multi-year programme
     #   "mixed"     no meaningful time pattern
     duration: str = ""
-    group: int = 0          # 1..9 — visual grouping prefix; 0 means ungrouped
+    group: int = 0          # 1..999 — visual grouping prefix; 0 means ungrouped
     # Exact existing top-level folder to reuse for modes that preserve
     # folders.  Empty in new mode / normal LLM-created categories.
     existing_folder: str = ""

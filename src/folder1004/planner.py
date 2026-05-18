@@ -1267,14 +1267,14 @@ class Planner:
                 ]
 
         # Convert cumulative categories into the same shape ``_plan_from_dict``
-        # expects.  Group is mandatory — coerce to 9 if missing.
+        # expects.  Group is mandatory — coerce to 999 if missing.
         out_cats: list[dict] = []
         for c in cum_cats:
             d = dict(c)
             try:
-                d["group"] = int(d.get("group") or 9) or 9
+                d["group"] = int(d.get("group") or 999) or 999
             except (TypeError, ValueError):
-                d["group"] = 9
+                d["group"] = 999
             out_cats.append(d)
 
         return {"categories": out_cats, "assignments": out_assigns}
@@ -1723,8 +1723,8 @@ def _plan_from_dict(
             group_val = int(c.get("group", 0) or 0)
         except (TypeError, ValueError):
             group_val = 0
-        if group_val < 1 or group_val > 9:
-            group_val = 9
+        if group_val < 1 or group_val > 999:
+            group_val = 999
         raw_name = str(c.get("name") or c.get("id") or "").strip()
         raw_desc = str(c.get("description", "") or "")
 
@@ -1790,12 +1790,12 @@ def _plan_from_dict(
             misc_seen = True
             c.id = "misc"
             c.name = "기타"
-            c.group = 9
+            c.group = 999
         canonical.append(c)
     cats = canonical
     cat_ids = {c.id for c in cats}
     if "misc" not in cat_ids:
-        cats.append(Category(id="misc", name="기타", description="분류하기 어려운 파일", group=9))
+        cats.append(Category(id="misc", name="기타", description="분류하기 어려운 파일", group=999))
         cat_ids.add("misc")
 
     assignments: list[Assignment] = []

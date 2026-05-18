@@ -61,7 +61,7 @@ def test_user_reported_latin1_mojibake_folder_name_is_rejected():
 def test_organizer_quarantines_preexisting_mojibake_folder(tmp_path):
     """User-reported case: pre-existing mojibake-named folders must be
     cleaned up — empty ones deleted, non-empty ones merged into the
-    single canonical "9. 기타" bucket (no "기타 (2)" siblings)."""
+    single canonical "999. 기타" bucket (no "기타 (2)" siblings)."""
     from folder1004.config import Config
     from folder1004.models import Plan
     from folder1004.organizer import Organizer
@@ -82,11 +82,11 @@ def test_organizer_quarantines_preexisting_mojibake_folder(tmp_path):
     assert not bad_kept_b.exists()
     # Both mojibake folders' contents merged into ONE 기타 — never
     # produce "기타 (2)".
-    misc = tmp_path / "9. 기타"
+    misc = tmp_path / "999. 기타"
     assert misc.is_dir()
     assert (misc / "leftover_a.txt").exists()
     assert (misc / "leftover_b.txt").exists()
-    assert not (tmp_path / "9. 기타 (2)").exists()
+    assert not (tmp_path / "999. 기타 (2)").exists()
 
 
 def test_organizer_uses_median_mtime_of_files(tmp_path):

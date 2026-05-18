@@ -7,7 +7,7 @@
 ; ``dist\folder1004\folder1004.exe`` and its supporting bundle.
 
 #define AppName "Folder1004"
-#define AppVersion "1.0.4"
+#define AppVersion "1.0.5"
 #define AppPublisher "Folder1004"
 #define AppExeName "folder1004.exe"
 
@@ -23,6 +23,7 @@ OutputBaseFilename=Folder1004-Setup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\assets\icon.ico
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
 
@@ -37,8 +38,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "..\dist\folder1004\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\{#AppExeName}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent

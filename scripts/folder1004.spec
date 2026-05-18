@@ -37,7 +37,7 @@ a = Analysis(
     [str(ENTRY)],
     pathex=[str(SRC)],
     binaries=[],
-    datas=[],
+    datas=[(str(ROOT / "assets"), "assets")],
     hiddenimports=[
         "folder1004",
         "folder1004.ui",
@@ -103,8 +103,8 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "Folder1004",
             "CFBundleDisplayName": "Folder1004",
-            "CFBundleShortVersionString": "1.0.4",
-            "CFBundleVersion": "1.0.4",
+            "CFBundleShortVersionString": "1.0.5",
+            "CFBundleVersion": "1.0.5",
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "11.0",
             "NSRequiresAquaSystemAppearance": False,

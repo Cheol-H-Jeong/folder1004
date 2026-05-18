@@ -39,6 +39,13 @@ class OperationInfo:
     report_path: str = ""
 
 
+@dataclass
+class OperationFileRow:
+    original_path: str
+    new_path: str
+    shortcut_paths: list[str]
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS operations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -477,6 +484,47 @@ class IndexDB:
             "SELECT id FROM operations ORDER BY id DESC LIMIT 1"
         ).fetchone()
         return row["id"] if row else None
+
+    def latest_real_operation_id(self) -> Optional[int]:
+        row = self.conn.execute(
+            """
+            SELECT id FROM operations
+            WHERE dry_run = 0
+              AND coalesce(json_extract(coalesce(stats_json,'{}'), '$.kind'), '') != 'reindex'
+            ORDER BY id DESC LIMIT 1
+            """
+        ).fetchone()
+        return row["id"] if row else None
+
+    def operation_file_rows(self, op_id: int) -> list[OperationFileRow]:
+        rows = self.conn.execute(
+            "SELECT id, original_path, new_path FROM files WHERE op_id = ? ORDER BY id DESC",
+            (op_id,),
+        ).fetchall()
+        out: list[OperationFileRow] = []
+        for r in rows:
+            shortcuts = [
+                s["shortcut_path"]
+                for s in self.conn.execute(
+                    "SELECT shortcut_path FROM shortcuts WHERE file_id = ?",
+                    (r["id"],),
+                ).fetchall()
+            ]
+            out.append(OperationFileRow(
+                original_path=r["original_path"],
+                new_path=r["new_path"],
+                shortcut_paths=shortcuts,
+            ))
+        return out
+
+    def delete_operation(self, op_id: int) -> None:
+        self.conn.execute(
+            "DELETE FROM shortcuts WHERE file_id IN (SELECT id FROM files WHERE op_id = ?)",
+            (op_id,),
+        )
+        self.conn.execute("DELETE FROM files WHERE op_id = ?", (op_id,))
+        self.conn.execute("DELETE FROM operations WHERE id = ?", (op_id,))
+        self.conn.commit()
 
     def close(self) -> None:
         try:

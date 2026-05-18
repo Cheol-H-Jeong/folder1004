@@ -52,3 +52,18 @@ def test_env_portable_mode_uses_exe_dir_data(tmp_path, monkeypatch):
     monkeypatch.setattr(config.sys, "executable", str(exe))
 
     assert config.default_paths().root == exe_dir / "data"
+
+
+def test_cli_recursive_defaults_on(tmp_path, monkeypatch):
+    import folder1004.__main__ as entry
+
+    seen = {}
+
+    def fake_run_cli(args):
+        seen["recursive"] = args.recursive
+        seen["path"] = args.path
+        return 0
+
+    monkeypatch.setattr(entry, "_run_cli", fake_run_cli)
+    assert entry.main(["--cli", "--path", str(tmp_path)]) == 0
+    assert seen == {"recursive": True, "path": str(tmp_path)}

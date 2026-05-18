@@ -512,6 +512,42 @@ def run(
     return op
 
 
+def apply_plan(
+    target_root: Path,
+    config: Config,
+    plan: Plan,
+    index_db: Optional[IndexDB] = None,
+    progress: Optional[ProgressCB] = None,
+    cancel_check=None,
+) -> OperationResult:
+    """Apply a user-confirmed preview plan without re-running analysis/LLM."""
+    target_root = Path(target_root)
+    mode = normalize_organize_mode(getattr(config, "organize_mode", ""))
+    config.organize_mode = mode
+    config.reclassify_mode = mode == ORGANIZE_MODE_FULL_REBUILD
+    if progress:
+        progress(f"organize: 미리보기 확정안 적용 시작 ({len(plan.assignments)}개)", 0.0)
+    organizer = Organizer(config)
+    op = organizer.execute(
+        target_root,
+        plan,
+        dry_run=False,
+        progress=progress,
+        cancel_check=cancel_check,
+    )
+    op.llm_usage = LLMUsage(model="preview-confirmed")
+    try:
+        op.report_path = emit_markdown(op)
+    except Exception as exc:
+        log.warning("report failed: %s", exc)
+    if index_db is not None:
+        try:
+            index_db.record_operation(op)
+        except Exception as exc:
+            log.warning("index record failed: %s", exc)
+    return op
+
+
 def _seed_categories_from_disk(
     target_root: Path, *, fa_only: bool = False,
 ) -> list[dict]:

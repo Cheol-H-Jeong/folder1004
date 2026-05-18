@@ -23,7 +23,7 @@ from ..config import (
 from ..folder_profile import analyze_folder_profile
 from ..metadata import collect
 from ..index import IndexDB
-from ..models import OperationResult
+from ..models import Assignment, OperationResult, Plan
 from .widgets import Card, PathDropBar, StageIndicator, StatsRow
 
 
@@ -254,10 +254,133 @@ def _open_in_explorer(path: Path):
         pass
 
 
+class PreviewPlanDialog(QtWidgets.QDialog):
+    """Draggable classification preview before mutating the filesystem."""
+
+    def __init__(self, op: OperationResult, parent=None):
+        super().__init__(parent)
+        self.op = op
+        self.setWindowTitle("분류 미리보기")
+        self.resize(980, 680)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 14)
+        layout.setSpacing(12)
+
+        intro = QtWidgets.QLabel(
+            "분석 결과입니다. 파일을 다른 폴더 항목으로 드래그앤드롭해 수정한 뒤 "
+            "“그대로 분류 실행”을 누르면 실제 파일 이동을 시작합니다."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        self.tree = QtWidgets.QTreeWidget()
+        self.tree.setHeaderLabels(["분류 폴더 / 파일", "예정 위치"])
+        self.tree.setAlternatingRowColors(True)
+        self.tree.setDragDropMode(QtWidgets.QAbstractItemView.InternalMove)
+        self.tree.setDefaultDropAction(QtCore.Qt.MoveAction)
+        self.tree.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        self.tree.setRootIsDecorated(True)
+        self.tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        self.tree.header().setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        layout.addWidget(self.tree, 1)
+
+        self._populate()
+
+        buttons = QtWidgets.QHBoxLayout()
+        buttons.addStretch(1)
+        cancel = QtWidgets.QPushButton("취소")
+        cancel.clicked.connect(self.reject)
+        run = QtWidgets.QPushButton("그대로 분류 실행")
+        run.setObjectName("Primary")
+        run.clicked.connect(self.accept)
+        buttons.addWidget(cancel)
+        buttons.addWidget(run)
+        layout.addLayout(buttons)
+
+    def _populate(self) -> None:
+        by_cat = {c.id: [] for c in self.op.categories}
+        for mf in self.op.moved:
+            by_cat.setdefault(mf.category_id, []).append(mf)
+        for cat in self.op.categories:
+            parent = QtWidgets.QTreeWidgetItem([cat.name or cat.id, cat.id])
+            parent.setData(0, QtCore.Qt.UserRole, {"type": "category", "category_id": cat.id})
+            parent.setFlags(
+                QtCore.Qt.ItemIsEnabled
+                | QtCore.Qt.ItemIsSelectable
+                | QtCore.Qt.ItemIsDropEnabled
+            )
+            parent.setExpanded(True)
+            self.tree.addTopLevelItem(parent)
+            for mf in by_cat.get(cat.id, []):
+                child = QtWidgets.QTreeWidgetItem([Path(mf.original_path).name, str(mf.new_path.parent)])
+                child.setToolTip(0, str(mf.original_path))
+                child.setToolTip(1, str(mf.new_path))
+                child.setData(0, QtCore.Qt.UserRole, {
+                    "type": "file",
+                    "original_path": str(mf.original_path),
+                    "score": float(mf.score or 0.0),
+                    "reason": mf.reason or "",
+                })
+                child.setFlags(
+                    QtCore.Qt.ItemIsEnabled
+                    | QtCore.Qt.ItemIsSelectable
+                    | QtCore.Qt.ItemIsDragEnabled
+                )
+                parent.addChild(child)
+        self.tree.expandAll()
+
+    def to_plan(self) -> Plan:
+        categories = []
+        assignments: list[Assignment] = []
+        assigned_paths: set[str] = set()
+        for i in range(self.tree.topLevelItemCount()):
+            parent = self.tree.topLevelItem(i)
+            pdata = parent.data(0, QtCore.Qt.UserRole) or {}
+            cid = pdata.get("category_id") or ""
+            cat = next((c for c in self.op.categories if c.id == cid), None)
+            if cat is None:
+                continue
+            if parent.childCount() == 0:
+                continue
+            categories.append(cat)
+            for j in range(parent.childCount()):
+                child = parent.child(j)
+                data = child.data(0, QtCore.Qt.UserRole) or {}
+                if data.get("type") != "file":
+                    continue
+                assignments.append(Assignment(
+                    file_path=Path(data["original_path"]),
+                    primary_category_id=cat.id,
+                    primary_score=float(data.get("score") or 1.0),
+                    reason=(data.get("reason") or "미리보기에서 확정"),
+                ))
+                assigned_paths.add(str(data["original_path"]))
+        # QTreeWidget's built-in InternalMove can leave a file at top-level
+        # after an awkward drop.  Never let that make the confirmed plan lose a
+        # file: anything not under a category falls back to its original preview
+        # assignment.
+        by_cat = {c.id: c for c in self.op.categories}
+        for mf in self.op.moved:
+            original = str(mf.original_path)
+            if original in assigned_paths:
+                continue
+            cat = by_cat.get(mf.category_id)
+            if cat is not None and cat not in categories:
+                categories.append(cat)
+            assignments.append(Assignment(
+                file_path=Path(original),
+                primary_category_id=mf.category_id,
+                primary_score=float(mf.score or 1.0),
+                reason=mf.reason or "미리보기에서 확정",
+            ))
+        return Plan(categories=categories, assignments=assignments)
+
+
 class OrganizeView(QtWidgets.QWidget):
-    # path, recursive, dry_run, mode ("new" | "incremental")
-    start_requested = QtCore.Signal(str, bool, bool, str)
+    # path, recursive, dry_run, mode, action ("preview" | "run")
+    start_requested = QtCore.Signal(str, bool, bool, str, str)
     cancel_requested = QtCore.Signal()
+    rollback_requested = QtCore.Signal()
 
     def __init__(self, config: Config, parent=None):
         super().__init__(parent)
@@ -312,8 +435,13 @@ class OrganizeView(QtWidgets.QWidget):
         opt_row.setContentsMargins(18, 14, 18, 14)
         opt_row.setSpacing(20)
 
-        self.chk_recursive = QtWidgets.QCheckBox("하위 폴더 포함")
-        self.chk_recursive.setChecked(self.config.recursive_default)
+        self.chk_recursive = QtWidgets.QCheckBox("하위 폴더 포함 (항상 적용)")
+        self.chk_recursive.setChecked(True)
+        self.chk_recursive.setEnabled(False)
+        self.chk_recursive.setToolTip(
+            "Folder1004는 기본적으로 하위 폴더까지 읽어 현재 구조를 이해합니다. "
+            "다만 아래 정리 방식 1~3은 현재 1-depth 폴더 체계만 재배치하고 내부는 해체하지 않습니다."
+        )
         opt_row.addWidget(self.chk_recursive)
         opt_row.addStretch(1)
 
@@ -328,7 +456,10 @@ class OrganizeView(QtWidgets.QWidget):
         mode_lbl.setObjectName("ModeTitle")
         mode_lbl.setStyleSheet("font-weight:600;")
         mode_lbl.setMinimumWidth(112)
-        mode_hint = QtWidgets.QLabel("기본 추천을 사용하면 Folder1004가 폴더 묶음을 보고 알아서 판단하되, 기존 하위 폴더는 해체하지 않습니다. 완전 재분류는 마지막 옵션에서만 실행됩니다.")
+        mode_hint = QtWidgets.QLabel(
+            "기본 추천은 Folder1004가 알아서 판단합니다. 아래 1~3번 방식은 현재 폴더 바로 아래의 1-depth 폴더 체계에만 적용됩니다. "
+            "하위 폴더 내용은 읽어서 참고하지만 해체하지 않습니다. 마지막 방식만 모든 하위 폴더까지 해체합니다."
+        )
         mode_hint.setObjectName("ModeHint")
         mode_hint.setWordWrap(True)
         mode_hint.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
@@ -340,24 +471,24 @@ class OrganizeView(QtWidgets.QWidget):
         mode_options_wrap = QtWidgets.QWidget()
         mode_options = FlowLayout(mode_options_wrap, margin=0, hspacing=20, vspacing=8)
 
-        self.rad_bundle = QtWidgets.QRadioButton("새 폴더 체계로 정리 (자동 판단 기본값·추천)")
+        self.rad_bundle = QtWidgets.QRadioButton("새 폴더 체계로 정리 (자동 판단 기본값)")
         self.rad_bundle.setToolTip(
-            "기존 하위 폴더는 해체하지 않고, 새로 만든 Folder1004 분류 폴더 안으로\n"
-            "폴더째 이동합니다. 최상위 체계만 새롭게 잡을 때 사용하세요."
+            "현재 폴더 바로 아래의 파일/폴더 묶음만 새 Folder1004 체계로 옮깁니다.\n"
+            "하위 폴더 내부는 해체하지 않습니다."
         )
         self.rad_existing = QtWidgets.QRadioButton("기존 폴더 체계 유지")
         self.rad_existing.setToolTip(
-            "기존 최상위 폴더는 그대로 두고, 루트에 흩어진 파일만 알맞은 기존 폴더나\n"
+            "현재 1-depth 기존 폴더는 그대로 두고, 루트에 흩어진 파일만 기존 폴더나\n"
             "새 Folder1004 폴더에 넣습니다. 기존 폴더 내부는 건드리지 않습니다."
         )
         self.rad_folder1004 = QtWidgets.QRadioButton("Folder1004 폴더만 유지")
         self.rad_folder1004.setToolTip(
-            "Folder1004가 만든 폴더는 그대로 두고, 그 밖의 파일과 일반 폴더만\n"
+            "현재 1-depth의 Folder1004 서명 폴더는 그대로 두고, 그 밖의 파일과 일반 폴더만\n"
             "묶음 단위로 기존/새 Folder1004 폴더에 정리합니다."
         )
         self.rad_full = QtWidgets.QRadioButton("모든 폴더 해체 후 재정리 (주의)")
         self.rad_full.setToolTip(
-            "하위 폴더 안의 파일까지 모두 꺼내 파일 단위로 다시 분류합니다.\n"
+            "모든 하위 폴더 안의 파일까지 모두 꺼내 파일 단위로 다시 분류합니다.\n"
             "기존 폴더명은 참고 힌트로만 사용합니다."
         )
 
@@ -479,9 +610,14 @@ class OrganizeView(QtWidgets.QWidget):
         # Action row
         actions = QtWidgets.QHBoxLayout()
         actions.setSpacing(10)
-        self.btn_primary = QtWidgets.QPushButton("정리 시작")
+        self.btn_preview = QtWidgets.QPushButton("분석 후 미리보기")
+        self.btn_preview.setObjectName("Ghost")
+        self.btn_preview.setToolTip("분석이 끝나면 드래그앤드롭으로 분류를 조정한 뒤 실제 정리를 실행합니다.")
+        self.btn_preview.clicked.connect(lambda: self._on_start("preview"))
+        self.btn_primary = QtWidgets.QPushButton("바로 끝까지 정리")
         self.btn_primary.setObjectName("Primary")
-        self.btn_primary.clicked.connect(self._on_start)
+        self.btn_primary.setToolTip("분석과 실제 파일 이동을 한 번에 끝까지 실행합니다.")
+        self.btn_primary.clicked.connect(lambda: self._on_start("run"))
         self.btn_cancel = QtWidgets.QPushButton("취소")
         self.btn_cancel.setObjectName("Ghost")
         self.btn_cancel.setVisible(False)
@@ -492,6 +628,7 @@ class OrganizeView(QtWidgets.QWidget):
         self.btn_open_log.clicked.connect(self._open_log_dir)
         actions.addWidget(self.btn_open_log)
         actions.addWidget(self.btn_cancel)
+        actions.addWidget(self.btn_preview)
         actions.addWidget(self.btn_primary)
         outer.addLayout(actions)
 
@@ -513,8 +650,13 @@ class OrganizeView(QtWidgets.QWidget):
         self.btn_open_report = QtWidgets.QPushButton("리포트 열기")
         self.btn_open_report.setObjectName("Ghost")
         self.btn_open_report.clicked.connect(self._open_report)
+        self.btn_rollback = QtWidgets.QPushButton("방금 정리 롤백")
+        self.btn_rollback.setObjectName("Ghost")
+        self.btn_rollback.setToolTip("마지막 정리 작업에서 옮긴 파일을 가능한 한 원래 위치로 되돌립니다.")
+        self.btn_rollback.clicked.connect(self.rollback_requested)
         top.addWidget(self.btn_open_folder)
         top.addWidget(self.btn_open_report)
+        top.addWidget(self.btn_rollback)
         rc.addLayout(top)
 
         self.stats_row = StatsRow()
@@ -605,7 +747,7 @@ class OrganizeView(QtWidgets.QWidget):
         self.badge_api.setStyle(self.badge_api.style())
 
     # ------------------------------------------------------------------
-    def _on_start(self):
+    def _on_start(self, action: str = "run"):
         path = self.path_bar.path()
         if not path:
             QtWidgets.QMessageBox.warning(self, "경로 필요", "먼저 정리할 폴더를 선택하세요.")
@@ -634,12 +776,13 @@ class OrganizeView(QtWidgets.QWidget):
         else:
             mode = ORGANIZE_MODE_BUNDLE_REBUILD
         self.start_requested.emit(
-            path, self.chk_recursive.isChecked(),
-            False, mode,
+            path, True,
+            action == "preview", mode, action,
         )
 
     def set_running(self, running: bool):
         self.btn_primary.setDisabled(running)
+        self.btn_preview.setDisabled(running)
         self.btn_cancel.setVisible(running)
         if running:
             self._frozen_after_cancel = False
@@ -800,6 +943,16 @@ class OrganizeView(QtWidgets.QWidget):
             self.cat_table.setItem(row, 1, QtWidgets.QTableWidgetItem(cat.name))
             self.cat_table.setItem(row, 2, QtWidgets.QTableWidgetItem(str(counter.get(cat.id, 0))))
         self.report_card.setVisible(True)
+        self.btn_rollback.setEnabled(not op.dry_run and op.operation_id is not None)
+
+    def confirm_preview_plan(self, op: OperationResult) -> Plan | None:
+        dialog = PreviewPlanDialog(op, self)
+        if dialog.exec() != QtWidgets.QDialog.Accepted:
+            self.set_running(False)
+            self.progress_label.setText("미리보기를 취소했습니다.")
+            self._set_toast(("info", "미리보기 취소", "실제 파일 이동은 실행되지 않았습니다."))
+            return None
+        return dialog.to_plan()
 
     def on_failed(self, msg: str):
         self.set_running(False)

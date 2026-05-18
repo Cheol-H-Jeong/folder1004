@@ -10,7 +10,8 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..config import Config, normalize_organize_mode, default_paths, load_config
 from ..index import IndexDB
-from ..worker import OrganizeWorker
+from ..models import Plan
+from ..worker import ApplyPlanWorker, OrganizeWorker
 from .styles import resolve_qss
 from .views import HistoryView, OrganizeView, SearchView, SettingsView
 from .widgets import NavButton
@@ -64,8 +65,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.resize(1180, 760)
 
         self._thread: QtCore.QThread | None = None
-        self._worker: OrganizeWorker | None = None
+        self._worker: OrganizeWorker | ApplyPlanWorker | None = None
         self._closing_after_worker = False
+        self._current_action = "run"
+        self._current_target: Path | None = None
 
         self._build()
         self._apply_style()
@@ -128,6 +131,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.organize_view.start_requested.connect(self._start)
         self.organize_view.cancel_requested.connect(self._cancel)
+        self.organize_view.rollback_requested.connect(self._rollback_latest)
         self.settings_view.config_changed.connect(self._on_config_changed)
 
         # Menu / shortcuts --------------------------------------------
@@ -166,6 +170,12 @@ class MainWindow(QtWidgets.QMainWindow):
         open_current = QtGui.QAction("현재 로그 파일 열기", self)
         open_current.triggered.connect(self._open_current_log)
         self.diagnostics_menu.addAction(open_current)
+
+        self.diagnostics_menu.addSeparator()
+
+        rollback = QtGui.QAction("최근 정리 롤백", self)
+        rollback.triggered.connect(self._rollback_latest)
+        self.diagnostics_menu.addAction(rollback)
 
     def _goto(self, idx: int):
         self.stack.setCurrentIndex(idx)
@@ -267,9 +277,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_status_badge()
 
     # ------------------------------------------------------------------
-    def _start(self, path: str, recursive: bool, dry_run: bool, mode: str = "new"):
+    def _start(self, path: str, recursive: bool, dry_run: bool, mode: str = "new", action: str = "run"):
         if self._thread is not None:
             return
+        self._current_action = action or ("preview" if dry_run else "run")
+        self._current_target = Path(path)
         # Persist the chosen mode onto the live config so the pipeline
         # picks it up.  Legacy mode ids are normalized for old configs.
         self.config.organize_mode = normalize_organize_mode(mode)
@@ -285,6 +297,28 @@ class MainWindow(QtWidgets.QMainWindow):
         self._worker = OrganizeWorker(
             Path(path), self.config, recursive, dry_run, self.index_db
         )
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._worker.stage_changed.connect(self.organize_view.on_stage)
+        self._worker.status.connect(self.organize_view.on_status)
+        self._worker.finished.connect(self._on_finished)
+        self._worker.failed.connect(self._on_failed)
+        self._thread.start()
+
+    def _start_preplanned(self, target: Path, plan: Plan):
+        if self._thread is not None:
+            return
+        self._current_action = "run"
+        self._current_target = Path(target)
+        from ..runlog import start_session
+
+        try:
+            start_session("organize")
+        except Exception:
+            pass
+        self.organize_view.set_running(True)
+        self._thread = QtCore.QThread()
+        self._worker = ApplyPlanWorker(Path(target), self.config, plan, self.index_db)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.stage_changed.connect(self.organize_view.on_stage)
@@ -322,13 +356,41 @@ class MainWindow(QtWidgets.QMainWindow):
         self.organize_view.show_canceled()
 
     def _on_finished(self, op):
-        self.organize_view.on_finished(op)
         self._teardown_worker()
+        if self._current_action == "preview" or op.dry_run:
+            plan = self.organize_view.confirm_preview_plan(op)
+            self._current_action = "run"
+            if plan is not None and self._current_target is not None:
+                self._start_preplanned(self._current_target, plan)
+            return
+        self.organize_view.on_finished(op)
         # refresh history list since we added a record
         if self.stack.currentWidget() is self.history_view:
             self.history_view.refresh()
         if getattr(self, "_closing_after_worker", False):
             self.close()
+
+    def _rollback_latest(self):
+        try:
+            from ..rollback import rollback_latest
+
+            result = rollback_latest(self.index_db)
+        except Exception as exc:
+            log.exception("rollback failed")
+            QtWidgets.QMessageBox.warning(self, "롤백 실패", str(exc) or type(exc).__name__)
+            return
+        if result.moved == 0 and result.deleted_shortcuts == 0:
+            QtWidgets.QMessageBox.information(self, "롤백할 작업 없음", "되돌릴 최근 정리 작업을 찾지 못했습니다.")
+            return
+        self.organize_view.on_status(
+            f"rollback: 파일 {result.moved}개 복구 / 바로가기 {result.deleted_shortcuts}개 제거 / 스킵 {len(result.skipped)}개"
+        )
+        self.organize_view._set_toast((
+            "info",
+            "최근 정리를 롤백했습니다",
+            f"파일 {result.moved}개를 원래 위치로 되돌렸습니다. 스킵 {len(result.skipped)}개.",
+        ))
+        self.history_view.refresh()
 
     def _on_failed(self, msg: str):
         log.error("organize failed: %s", msg)
@@ -371,6 +433,12 @@ def launch(argv: list[str] | None = None) -> int:
         start_session("gui")
     except Exception:
         pass
+    try:
+        from ..app_icon import set_windows_app_user_model_id
+
+        set_windows_app_user_model_id()
+    except Exception:
+        pass
     _install_qt_message_logging()
 
     QtWidgets.QApplication.setHighDpiScaleFactorRoundingPolicy(
@@ -386,9 +454,21 @@ def launch(argv: list[str] | None = None) -> int:
     app.setApplicationDisplayName("Folder1004")
     app.setOrganizationName("Folder1004")
     app.setOrganizationDomain("folder1004.app")
+    icon = QtGui.QIcon()
+    try:
+        from ..app_icon import app_icon
+
+        icon = app_icon()
+        app.setWindowIcon(icon)
+    except Exception:
+        log.debug("app icon load skipped", exc_info=True)
 
     paths = default_paths()
     config = load_config(paths)
     window = MainWindow(config, paths)
+    try:
+        window.setWindowIcon(icon)
+    except Exception:
+        pass
     window.show()
     return app.exec()

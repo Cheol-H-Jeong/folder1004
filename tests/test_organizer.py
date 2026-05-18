@@ -147,14 +147,14 @@ def test_compose_folder_name_per_duration():
     import re
     folder1004 = re.compile(r"\s\[Folder1004·[a-f0-9]{4,12}\]$")
     assert folder1004.search(compose_folder_name(burst))
-    assert compose_folder_name(burst).startswith("2. 제안발표 (2024-03)")
-    assert compose_folder_name(short).startswith("1. AVOCA (2024-Q3)")
-    assert compose_folder_name(annual).startswith("3. 연간 보고 (2024)")
+    assert compose_folder_name(burst).startswith("002. 제안발표 (2024-03)")
+    assert compose_folder_name(short).startswith("001. AVOCA (2024-Q3)")
+    assert compose_folder_name(annual).startswith("003. 연간 보고 (2024)")
     name_multi = compose_folder_name(multi)
-    assert name_multi.startswith("1. 범정부 초거대 AI 공통기반")
+    assert name_multi.startswith("001. 범정부 초거대 AI 공통기반")
     assert "〈2023–2025〉" in name_multi
     assert folder1004.search(name_multi)
-    assert compose_folder_name(mixed).startswith("9. 기타")
+    assert compose_folder_name(mixed).startswith("009. 기타")
     assert folder1004.search(compose_folder_name(mixed))
 
 
@@ -175,7 +175,7 @@ def test_existing_folder_with_same_core_name_is_reused(tmp_path):
     # the prefix and assert the legacy + new files both ended up
     # inside.
     matches = [d for d in tmp_path.iterdir() if d.is_dir()
-               and d.name.startswith("1. AVOCA 시스템 (2024-Q3)")]
+               and d.name.startswith("001. AVOCA 시스템 (2024-Q3)")]
     assert matches, f"no folder matching prefix found in {list(tmp_path.iterdir())}"
     canonical = matches[0]
     assert "[Folder1004·" in canonical.name

@@ -108,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="folder1004")
     parser.add_argument("--cli", action="store_true", help="run headless without launching UI")
     parser.add_argument("--path", type=str, help="target folder for --cli mode")
-    parser.add_argument("--recursive", action="store_true", help="include subfolders")
+    parser.add_argument("--recursive", action="store_true", default=True, help="include subfolders (always on; kept for compatibility)")
     parser.add_argument("--dry-run", action="store_true", help="plan without moving files")
     parser.add_argument("--mock", action="store_true", help="force mock planner")
     parser.add_argument(
