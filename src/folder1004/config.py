@@ -12,13 +12,17 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 
+ORGANIZE_MODE_AGENT_TOPLEVEL = "agent_toplevel"
 ORGANIZE_MODE_BUNDLE_REBUILD = "bundle_rebuild"
 ORGANIZE_MODE_PRESERVE_EXISTING = "preserve_existing"
 ORGANIZE_MODE_PRESERVE_FOLDER1004 = "preserve_folder1004"
 ORGANIZE_MODE_FULL_REBUILD = "full_rebuild"
 
 ORGANIZE_MODE_ALIASES = {
-    "": ORGANIZE_MODE_BUNDLE_REBUILD,
+    "": ORGANIZE_MODE_AGENT_TOPLEVEL,
+    "agent": ORGANIZE_MODE_AGENT_TOPLEVEL,
+    "agent_top": ORGANIZE_MODE_AGENT_TOPLEVEL,
+    "agent_toplevel": ORGANIZE_MODE_AGENT_TOPLEVEL,
     "new": ORGANIZE_MODE_BUNDLE_REBUILD,
     "bundle": ORGANIZE_MODE_BUNDLE_REBUILD,
     "bundle_rebuild": ORGANIZE_MODE_BUNDLE_REBUILD,
@@ -36,10 +40,10 @@ def normalize_organize_mode(mode: str | None) -> str:
 
     Legacy ids (``new``/``incremental``/``additive``) are still accepted
     so old config files and older UI builds load safely.  The product
-    default is the safer bundle-preserving rebuild.
+    default is the safer agent-friendly top-level rebuild.
     """
     key = (mode or "").strip().lower()
-    return ORGANIZE_MODE_ALIASES.get(key, ORGANIZE_MODE_BUNDLE_REBUILD)
+    return ORGANIZE_MODE_ALIASES.get(key, ORGANIZE_MODE_AGENT_TOPLEVEL)
 
 _KEYRING_SERVICE = "folder1004"
 _KEYRING_USER = "gemini_api_key"  # legacy, kept for migration
@@ -355,6 +359,11 @@ class Config:
     reclassify_mode: bool = False
 
     # User-facing organize mode chosen on the start screen:
+    #   "agent_toplevel"      에이전트 친화 최상위 정리 — build a
+    #                          CLI/search-friendly Folder1004 top-level
+    #                          catalogue while moving current 1-depth
+    #                          folders as intact bundles. Existing inner
+    #                          folder structures are never dissolved.
     #   "bundle_rebuild"       새 폴더 체계로 정리 — only the current
     #                          1-depth top-level folders are reorganized as
     #                          intact bundles under a new Folder1004 folder
@@ -370,7 +379,7 @@ class Config:
     #   "full_rebuild"         모든 폴더 해체 후 재정리 — recursively dissolve
     #                          every subfolder and classify every file
     #                          individually, using old folder names as hints.
-    organize_mode: str = ORGANIZE_MODE_BUNDLE_REBUILD
+    organize_mode: str = ORGANIZE_MODE_AGENT_TOPLEVEL
 
     # Duplicate-file dedup threshold (bytes).  When ≥ 2 files share
     # the same content (size + hash), all but one are *deleted* after

@@ -278,7 +278,8 @@ def test_default_mode_explains_auto_decision():
     labels = [child.text() for child in view.findChildren(QtWidgets.QLabel)]
     radios = [child.text() for child in view.findChildren(QtWidgets.QRadioButton)]
     assert any("알아서 판단" in text for text in labels)
-    assert any("자동 판단 기본값" in text for text in radios)
+    assert any("추천 기본값" in text for text in radios)
+    assert getattr(view, "rad_agent").isChecked()
     view.close()
 
 
@@ -320,13 +321,12 @@ def test_organize_view_removes_dry_run_checkbox_and_emits_live_run(tmp_path, mon
     assert not any("Dry" in text or "미리보기" in text for text in checkboxes)
 
     emitted = []
-    view.start_requested.connect(
-        lambda path, recursive, dry_run, mode: emitted.append((path, recursive, dry_run, mode))
-    )
+    view.start_requested.connect(lambda *args: emitted.append(args))
     view.path_bar.set_path(str(folder))
     view._on_start()
     assert emitted
     assert emitted[-1][2] is False
+    assert emitted[-1][3] == "agent_toplevel"
     view.close()
 
 
@@ -367,7 +367,7 @@ def test_folder_mode_options_wrap_without_overlap():
     view.show()
     app.processEvents()
 
-    radios = [view.rad_new, view.rad_inc, view.rad_add]
+    radios = [view.rad_agent, view.rad_new, view.rad_inc, view.rad_add]
     rects = [
         QtCore.QRect(radio.mapTo(view, QtCore.QPoint(0, 0)), radio.size()).adjusted(1, 1, -1, -1)
         for radio in radios

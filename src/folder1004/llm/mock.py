@@ -4,6 +4,7 @@ the pipeline is testable and resilient.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import Counter
 from typing import Iterable
@@ -103,6 +104,17 @@ def _keyword_category(text: str):
     return None
 
 
+def _folder_bundle_category(name: str, excerpt: str) -> tuple[str, str, str, str, str]:
+    clean = re.sub(r"\s+", " ", (name or "폴더 묶음").strip(" /\\._-")) or "폴더 묶음"
+    digest = hashlib.sha1(clean.encode("utf-8", "ignore")).hexdigest()[:8]
+    years = re.findall(r"(?:19\d{2}|20\d{2}|21\d{2})", f"{name}\n{excerpt}")
+    time_label = years[0] if years else ""
+    desc_terms = ["기존 1-depth 폴더를 해체하지 않는 에이전트 친화 묶음"]
+    if years:
+        desc_terms.append("연도 " + " ".join(dict.fromkeys(years[:4])))
+    return f"folder_{digest}", clean, " / ".join(desc_terms), time_label, "annual" if time_label else "mixed"
+
+
 def plan(files: Iterable[dict], ambiguity_threshold: float = 0.15) -> dict:
     """Return a structure compatible with the planner's final shape.
 
@@ -111,6 +123,7 @@ def plan(files: Iterable[dict], ambiguity_threshold: float = 0.15) -> dict:
     files = list(files)
     assignments: list[dict] = []
     category_buckets: dict[str, dict] = {}
+    folder_category_ids: set[str] = set()
 
     for f in files:
         name = f.get("name", "")
@@ -118,22 +131,37 @@ def plan(files: Iterable[dict], ambiguity_threshold: float = 0.15) -> dict:
         ext = f.get("ext", "").lower()
 
         score = 0.6
-        cat = _keyword_category(name + "\n" + excerpt)
-        if cat is not None:
-            cid, cname = cat
-            score = 0.8
-            desc = "파일명/본문 키워드로 식별"
+        if ext == "[folder]":
+            cid, cname, desc, time_label, duration = _folder_bundle_category(name, excerpt)
+            score = 0.85
+            folder_category_ids.add(cid)
+            category_buckets.setdefault(
+                cid,
+                {
+                    "id": cid,
+                    "name": cname,
+                    "description": desc,
+                    "time_label": time_label,
+                    "duration": duration,
+                },
+            )
         else:
-            grp = _EXT_GROUPS.get(ext)
-            if grp is not None:
-                cid, cname = grp
-                desc = "확장자 기반 분류"
+            cat = _keyword_category(name + "\n" + excerpt)
+            if cat is not None:
+                cid, cname = cat
+                score = 0.8
+                desc = "파일명/본문 키워드로 식별"
             else:
-                cid, cname = "misc", "기타"
-                desc = "매칭된 카테고리 없음"
-                score = 0.4
+                grp = _EXT_GROUPS.get(ext)
+                if grp is not None:
+                    cid, cname = grp
+                    desc = "확장자 기반 분류"
+                else:
+                    cid, cname = "misc", "기타"
+                    desc = "매칭된 카테고리 없음"
+                    score = 0.4
 
-        category_buckets.setdefault(cid, {"id": cid, "name": cname, "description": desc})
+            category_buckets.setdefault(cid, {"id": cid, "name": cname, "description": desc})
         assignments.append(
             {
                 "path": f.get("path"),
@@ -147,6 +175,7 @@ def plan(files: Iterable[dict], ambiguity_threshold: float = 0.15) -> dict:
     # Collapse categories with < 2 files into "misc" unless only one category exists.
     counts = Counter(a["primary"] for a in assignments)
     keep_ids = {cid for cid, n in counts.items() if n >= 2}
+    keep_ids.update(folder_category_ids)
     if not keep_ids or len(keep_ids) < 2:
         keep_ids = set(category_buckets.keys())
     for a in assignments:

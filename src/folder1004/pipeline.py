@@ -15,6 +15,7 @@ import sys
 
 from .config import (
     Config,
+    ORGANIZE_MODE_AGENT_TOPLEVEL,
     ORGANIZE_MODE_BUNDLE_REBUILD,
     ORGANIZE_MODE_FULL_REBUILD,
     ORGANIZE_MODE_PRESERVE_EXISTING,
@@ -278,6 +279,7 @@ def run(
     # summarized as intact bundles; the only mode that truly dissolves folders
     # is full_rebuild.
     scan_recursive = recursive or mode in {
+        ORGANIZE_MODE_AGENT_TOPLEVEL,
         ORGANIZE_MODE_BUNDLE_REBUILD,
         ORGANIZE_MODE_PRESERVE_FOLDER1004,
         ORGANIZE_MODE_FULL_REBUILD,
@@ -302,13 +304,19 @@ def run(
     config.reclassify_mode = mode == ORGANIZE_MODE_FULL_REBUILD
 
     seed_categories: list[dict] = []
-    if mode == ORGANIZE_MODE_BUNDLE_REBUILD:
+    if mode in {ORGANIZE_MODE_AGENT_TOPLEVEL, ORGANIZE_MODE_BUNDLE_REBUILD}:
         entries, bundle_count, _skipped = _entries_with_top_level_bundles(target_root, entries)
         if progress:
-            progress(
-                f"plan: 새 폴더 체계로 정리 — 기존 하위 폴더 {bundle_count}개를 해체하지 않고 묶음으로 분류",
-                0.06,
-            )
+            if mode == ORGANIZE_MODE_AGENT_TOPLEVEL:
+                progress(
+                    f"plan: 에이전트 친화 최상위 정리 — 기존 하위 폴더 {bundle_count}개를 해체하지 않고 검색 친화 폴더로 분류",
+                    0.06,
+                )
+            else:
+                progress(
+                    f"plan: 새 폴더 체계로 정리 — 기존 하위 폴더 {bundle_count}개를 해체하지 않고 묶음으로 분류",
+                    0.06,
+                )
     elif mode == ORGANIZE_MODE_PRESERVE_EXISTING:
         # 기존 폴더 체계 유지 — 기존 최상위 폴더 전체를 카테고리로 활용하고,
         # 루트에 흩어진 파일만 기존/신규 폴더로 보낸다.

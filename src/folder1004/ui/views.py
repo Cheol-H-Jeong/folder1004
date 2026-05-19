@@ -11,6 +11,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from ..config import (
     CLASSIFICATION_GUIDANCE_PRESETS,
     Config,
+    ORGANIZE_MODE_AGENT_TOPLEVEL,
     ORGANIZE_MODE_BUNDLE_REBUILD,
     ORGANIZE_MODE_FULL_REBUILD,
     ORGANIZE_MODE_PRESERVE_EXISTING,
@@ -471,7 +472,13 @@ class OrganizeView(QtWidgets.QWidget):
         mode_options_wrap = QtWidgets.QWidget()
         mode_options = FlowLayout(mode_options_wrap, margin=0, hspacing=20, vspacing=8)
 
-        self.rad_bundle = QtWidgets.QRadioButton("새 폴더 체계로 정리 (자동 판단 기본값)")
+        self.rad_agent = QtWidgets.QRadioButton("에이전트 친화 최상위 정리 (추천 기본값·자동 판단)")
+        self.rad_agent.setToolTip(
+            "현재 폴더 바로 아래의 파일/폴더 묶음을 에이전트가 CLI에서 찾기 쉬운\n"
+            "연도·기관·프로젝트·용도 중심 최상위 Folder1004 체계로 옮깁니다.\n"
+            "하위 폴더 내부 구조는 해체하지 않습니다."
+        )
+        self.rad_bundle = QtWidgets.QRadioButton("새 폴더 체계로 정리")
         self.rad_bundle.setToolTip(
             "현재 폴더 바로 아래의 파일/폴더 묶음만 새 Folder1004 체계로 옮깁니다.\n"
             "하위 폴더 내부는 해체하지 않습니다."
@@ -498,14 +505,15 @@ class OrganizeView(QtWidgets.QWidget):
         self.rad_add = self.rad_folder1004
 
         current_mode = normalize_organize_mode(getattr(self.config, "organize_mode", ""))
+        self.rad_agent.setChecked(current_mode == ORGANIZE_MODE_AGENT_TOPLEVEL)
         self.rad_bundle.setChecked(current_mode == ORGANIZE_MODE_BUNDLE_REBUILD)
         self.rad_existing.setChecked(current_mode == ORGANIZE_MODE_PRESERVE_EXISTING)
         self.rad_folder1004.setChecked(current_mode == ORGANIZE_MODE_PRESERVE_FOLDER1004)
         self.rad_full.setChecked(current_mode == ORGANIZE_MODE_FULL_REBUILD)
-        if not (self.rad_bundle.isChecked() or self.rad_existing.isChecked() or self.rad_folder1004.isChecked() or self.rad_full.isChecked()):
-            self.rad_bundle.setChecked(True)
+        if not (self.rad_agent.isChecked() or self.rad_bundle.isChecked() or self.rad_existing.isChecked() or self.rad_folder1004.isChecked() or self.rad_full.isChecked()):
+            self.rad_agent.setChecked(True)
         mode_grp = QtWidgets.QButtonGroup(self)
-        for rb in (self.rad_bundle, self.rad_existing, self.rad_folder1004, self.rad_full):
+        for rb in (self.rad_agent, self.rad_bundle, self.rad_existing, self.rad_folder1004, self.rad_full):
             mode_grp.addButton(rb)
             mode_options.addWidget(rb)
         mc.addWidget(mode_options_wrap)
@@ -773,8 +781,10 @@ class OrganizeView(QtWidgets.QWidget):
             mode = ORGANIZE_MODE_PRESERVE_FOLDER1004
         elif self.rad_existing.isChecked():
             mode = ORGANIZE_MODE_PRESERVE_EXISTING
-        else:
+        elif self.rad_bundle.isChecked():
             mode = ORGANIZE_MODE_BUNDLE_REBUILD
+        else:
+            mode = ORGANIZE_MODE_AGENT_TOPLEVEL
         self.start_requested.emit(
             path, True,
             action == "preview", mode, action,

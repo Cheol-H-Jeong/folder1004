@@ -114,15 +114,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--mode",
         choices=[
+            "agent_toplevel",
             "bundle_rebuild",
             "preserve_existing",
             "preserve_folder1004",
             "full_rebuild",
+            "agent",
+            "agent_top",
             "new",
             "incremental",
             "additive",
         ],
-        help="folder handling mode for --cli (default: saved config or bundle_rebuild)",
+        help="folder handling mode for --cli (default: saved config or agent_toplevel)",
     )
     parser.add_argument(
         "--no-economy",

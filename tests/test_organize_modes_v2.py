@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from folder1004.config import (
     Config,
+    ORGANIZE_MODE_AGENT_TOPLEVEL,
     ORGANIZE_MODE_BUNDLE_REBUILD,
     ORGANIZE_MODE_FULL_REBUILD,
     ORGANIZE_MODE_PRESERVE_EXISTING,
@@ -15,6 +16,29 @@ def _cfg(mode: str) -> Config:
     cfg.organize_mode = mode
     cfg.dedup_min_bytes = -1
     return cfg
+
+
+def test_agent_toplevel_is_default_and_keeps_existing_tree_intact(tmp_path):
+    folder = tmp_path / "2024_행안부_범정부AI"
+    nested = folder / "기존분류" / "회의"
+    nested.mkdir(parents=True)
+    (nested / "회의록.txt").write_text("범정부 AI 회의 내용", encoding="utf-8")
+    (tmp_path / "루트_메모.txt").write_text("행안부 범정부AI 참고", encoding="utf-8")
+
+    run(tmp_path, _cfg(ORGANIZE_MODE_AGENT_TOPLEVEL), recursive=False, dry_run=False, force_mock=True)
+
+    assert not folder.exists()
+    moved = list(tmp_path.glob("*/2024_행안부_범정부AI/기존분류/회의/회의록.txt"))
+    assert moved, sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*"))
+    assert "2024_행안부_범정부AI" in moved[0].relative_to(tmp_path).parts[0]
+
+
+def test_normalize_unknown_mode_uses_agent_toplevel_default():
+    from folder1004.config import normalize_organize_mode
+
+    assert Config().organize_mode == ORGANIZE_MODE_AGENT_TOPLEVEL
+    assert normalize_organize_mode("") == ORGANIZE_MODE_AGENT_TOPLEVEL
+    assert normalize_organize_mode("unknown-from-old-config") == ORGANIZE_MODE_AGENT_TOPLEVEL
 
 
 def test_bundle_rebuild_moves_existing_top_folder_as_intact_bundle(tmp_path):
