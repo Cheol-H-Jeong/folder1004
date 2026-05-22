@@ -15,6 +15,7 @@ import sys
 
 from .config import (
     Config,
+    ORGANIZE_MODE_METADATA_INDEX,
     ORGANIZE_MODE_AGENT_TOPLEVEL,
     ORGANIZE_MODE_BUNDLE_REBUILD,
     ORGANIZE_MODE_FULL_REBUILD,
@@ -274,8 +275,47 @@ def run(
     mode = normalize_organize_mode(getattr(config, "organize_mode", ""))
     config.organize_mode = mode
 
+    if mode == ORGANIZE_MODE_METADATA_INDEX:
+        from datetime import datetime
+
+        from .agent_index import build_agent_index
+        from .models import OperationResult
+
+        if progress:
+            progress("agent-index: 기존 폴더/파일은 유지하고 탐색 지도·문서 인덱스만 갱신", 0.02)
+        started = datetime.now().astimezone()
+        agent_result = build_agent_index(
+            target_root,
+            config,
+            progress=progress,
+            cancel_check=cancel_check,
+        )
+        op = OperationResult(
+            target_root=target_root,
+            started_at=started,
+            finished_at=datetime.now().astimezone(),
+            dry_run=False,
+            categories=[],
+            moved=[],
+            skipped=[],
+            total_scanned=agent_result.files,
+            llm_usage=LLMUsage(model="metadata-index"),
+            folder_profile=None,
+        )
+        op.agent_index = agent_result
+        try:
+            op.report_path = emit_markdown(op)
+        except Exception as exc:
+            log.warning("report failed: %s", exc)
+        if index_db is not None and not dry_run:
+            try:
+                index_db.record_operation(op)
+            except Exception as exc:
+                log.warning("index record failed: %s", exc)
+        return op
+
     # The folder-handling modes define whether subfolders are inspected.  The
-    # safe default modes need recursive metadata so top-level folders can be
+    # safe physical modes need recursive metadata so top-level folders can be
     # summarized as intact bundles; the only mode that truly dissolves folders
     # is full_rebuild.
     scan_recursive = recursive or mode in {

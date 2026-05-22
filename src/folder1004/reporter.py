@@ -26,6 +26,15 @@ def _build(op: OperationResult) -> str:
     lines.append(f"- 소요: {dur:.1f} 초")
     lines.append(f"- 모드: {'Dry-Run (변경 없음)' if op.dry_run else '실행'}")
     lines.append(f"- 스캔: {op.total_scanned}개 / 이동: {op.total_moved}개 / 바로가기: {op.total_shortcuts}개 / 스킵: {op.total_skipped}개")
+    agent_index = getattr(op, "agent_index", None)
+    if agent_index is not None:
+        lines.append("- 실행 유형: 비파괴 메타데이터/검색 인덱스 생성")
+        lines.append(
+            f"- `.folder1004` 인덱스: 폴더 {agent_index.folders}개 / "
+            f"문서 캐시 신규 {agent_index.docs_parsed}개, 재사용 {agent_index.docs_reused}개, 실패 {agent_index.docs_failed}개"
+        )
+        if agent_index.agent_map:
+            lines.append(f"- 에이전트 탐색 지도: `{agent_index.agent_map}`")
     if getattr(op, "dupes_removed", None):
         mb = (op.bytes_freed or 0) / (1 << 20)
         lines.append(
@@ -91,6 +100,19 @@ def _build(op: OperationResult) -> str:
             for ext, count in list(ext_counts.items())[:10]:
                 lines.append(f"| `{ext}` | {count} |")
             lines.append("")
+
+    agent_index = getattr(op, "agent_index", None)
+    if agent_index is not None:
+        lines.append("## Folder1004 탐색 인덱스")
+        lines.append("")
+        lines.append("기존 폴더 구조와 파일명은 변경하지 않았고, `.folder1004/` 아래에 탐색 보조 데이터만 생성/갱신했습니다.")
+        lines.append("")
+        lines.append("- 전체 지도: `.folder1004/agent_map.md`")
+        lines.append("- 폴더 메타: `.folder1004/folder_index.jsonl`")
+        lines.append("- 파일 메타: `.folder1004/file_index.jsonl`")
+        lines.append("- 문서 인덱스: `.folder1004/document_index.jsonl`")
+        lines.append("- 문서 텍스트 캐시: `.folder1004/doc_text/`")
+        lines.append("")
 
     # Per-call breakdown so the user can see *which* call was slow.
     if op.llm_usage is not None and op.llm_usage.calls:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from folder1004.config import (
     Config,
+    ORGANIZE_MODE_METADATA_INDEX,
     ORGANIZE_MODE_AGENT_TOPLEVEL,
     ORGANIZE_MODE_BUNDLE_REBUILD,
     ORGANIZE_MODE_FULL_REBUILD,
@@ -18,7 +19,7 @@ def _cfg(mode: str) -> Config:
     return cfg
 
 
-def test_agent_toplevel_is_default_and_keeps_existing_tree_intact(tmp_path):
+def test_agent_toplevel_keeps_existing_tree_intact_when_explicit(tmp_path):
     folder = tmp_path / "2024_행안부_범정부AI"
     nested = folder / "기존분류" / "회의"
     nested.mkdir(parents=True)
@@ -33,12 +34,12 @@ def test_agent_toplevel_is_default_and_keeps_existing_tree_intact(tmp_path):
     assert "2024_행안부_범정부AI" in moved[0].relative_to(tmp_path).parts[0]
 
 
-def test_normalize_unknown_mode_uses_agent_toplevel_default():
+def test_normalize_unknown_mode_uses_metadata_index_default():
     from folder1004.config import normalize_organize_mode
 
-    assert Config().organize_mode == ORGANIZE_MODE_AGENT_TOPLEVEL
-    assert normalize_organize_mode("") == ORGANIZE_MODE_AGENT_TOPLEVEL
-    assert normalize_organize_mode("unknown-from-old-config") == ORGANIZE_MODE_AGENT_TOPLEVEL
+    assert Config().organize_mode == ORGANIZE_MODE_METADATA_INDEX
+    assert normalize_organize_mode("") == ORGANIZE_MODE_METADATA_INDEX
+    assert normalize_organize_mode("unknown-from-old-config") == ORGANIZE_MODE_METADATA_INDEX
 
 
 def test_bundle_rebuild_moves_existing_top_folder_as_intact_bundle(tmp_path):

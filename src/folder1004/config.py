@@ -12,6 +12,7 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 
+ORGANIZE_MODE_METADATA_INDEX = "metadata_index"
 ORGANIZE_MODE_AGENT_TOPLEVEL = "agent_toplevel"
 ORGANIZE_MODE_BUNDLE_REBUILD = "bundle_rebuild"
 ORGANIZE_MODE_PRESERVE_EXISTING = "preserve_existing"
@@ -19,7 +20,12 @@ ORGANIZE_MODE_PRESERVE_FOLDER1004 = "preserve_folder1004"
 ORGANIZE_MODE_FULL_REBUILD = "full_rebuild"
 
 ORGANIZE_MODE_ALIASES = {
-    "": ORGANIZE_MODE_AGENT_TOPLEVEL,
+    "": ORGANIZE_MODE_METADATA_INDEX,
+    "default": ORGANIZE_MODE_METADATA_INDEX,
+    "index": ORGANIZE_MODE_METADATA_INDEX,
+    "metadata": ORGANIZE_MODE_METADATA_INDEX,
+    "metadata_index": ORGANIZE_MODE_METADATA_INDEX,
+    "prepare": ORGANIZE_MODE_METADATA_INDEX,
     "agent": ORGANIZE_MODE_AGENT_TOPLEVEL,
     "agent_top": ORGANIZE_MODE_AGENT_TOPLEVEL,
     "agent_toplevel": ORGANIZE_MODE_AGENT_TOPLEVEL,
@@ -40,10 +46,10 @@ def normalize_organize_mode(mode: str | None) -> str:
 
     Legacy ids (``new``/``incremental``/``additive``) are still accepted
     so old config files and older UI builds load safely.  The product
-    default is the safer agent-friendly top-level rebuild.
+    default is the non-destructive metadata/index preparation mode.
     """
     key = (mode or "").strip().lower()
-    return ORGANIZE_MODE_ALIASES.get(key, ORGANIZE_MODE_AGENT_TOPLEVEL)
+    return ORGANIZE_MODE_ALIASES.get(key, ORGANIZE_MODE_METADATA_INDEX)
 
 _KEYRING_SERVICE = "folder1004"
 _KEYRING_USER = "gemini_api_key"  # legacy, kept for migration
@@ -282,6 +288,10 @@ class Config:
     ambiguity_threshold: float = 0.15
     max_excerpt_chars: int = 1800
     parse_timeout_s: float = 5.0
+    # Non-destructive agent/human metadata preparation. Parser-required
+    # documents get full-ish text caches under target/.folder1004/doc_text.
+    agent_doc_text_max_chars: int = 2_000_000
+    agent_doc_text_chunk_chars: int = 1_000_000
     recursive_default: bool = True
     include_hidden: bool = False
     language: str = "ko"
@@ -359,6 +369,11 @@ class Config:
     reclassify_mode: bool = False
 
     # User-facing organize mode chosen on the start screen:
+    #   "metadata_index"      탐색 지도/인덱스만 생성 — keep all
+    #                          folders, filenames, and source contents
+    #                          unchanged while writing `.folder1004`
+    #                          folder/file/document metadata and text
+    #                          caches for CLI agents.
     #   "agent_toplevel"      에이전트 친화 최상위 정리 — build a
     #                          CLI/search-friendly Folder1004 top-level
     #                          catalogue while moving current 1-depth
@@ -379,7 +394,7 @@ class Config:
     #   "full_rebuild"         모든 폴더 해체 후 재정리 — recursively dissolve
     #                          every subfolder and classify every file
     #                          individually, using old folder names as hints.
-    organize_mode: str = ORGANIZE_MODE_AGENT_TOPLEVEL
+    organize_mode: str = ORGANIZE_MODE_METADATA_INDEX
 
     # Duplicate-file dedup threshold (bytes).  When ≥ 2 files share
     # the same content (size + hash), all but one are *deleted* after

@@ -1,6 +1,6 @@
 """End-to-end smoke test with the mock planner."""
 
-from folder1004.config import Config
+from folder1004.config import Config, ORGANIZE_MODE_AGENT_TOPLEVEL
 from folder1004.index import IndexDB
 from folder1004.pipeline import run
 
@@ -18,9 +18,11 @@ def test_full_pipeline_mock(tmp_path, monkeypatch):
     (tmp_path / "readme.txt").write_text("Hello world")
 
     db = IndexDB(tmp_path / "_idx.db")
+    cfg = Config()
+    cfg.organize_mode = ORGANIZE_MODE_AGENT_TOPLEVEL
     op = run(
         target_root=tmp_path,
-        config=Config(),
+        config=cfg,
         recursive=False,
         dry_run=False,
         index_db=db,
