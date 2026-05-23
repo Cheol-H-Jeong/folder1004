@@ -103,8 +103,8 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "Folder1004",
             "CFBundleDisplayName": "Folder1004",
-            "CFBundleShortVersionString": "1.0.9",
-            "CFBundleVersion": "1.0.9",
+            "CFBundleShortVersionString": "1.0.10",
+            "CFBundleVersion": "1.0.10",
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "11.0",
             "NSRequiresAquaSystemAppearance": False,
