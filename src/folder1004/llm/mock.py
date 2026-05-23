@@ -109,7 +109,7 @@ def _folder_bundle_category(name: str, excerpt: str) -> tuple[str, str, str, str
     digest = hashlib.sha1(clean.encode("utf-8", "ignore")).hexdigest()[:8]
     years = re.findall(r"(?:19\d{2}|20\d{2}|21\d{2})", f"{name}\n{excerpt}")
     time_label = years[0] if years else ""
-    desc_terms = ["기존 1-depth 폴더를 해체하지 않는 에이전트 친화 묶음"]
+    desc_terms = ["기존 1-depth 폴더를 해체하지 않는 묶음 정리"]
     if years:
         desc_terms.append("연도 " + " ".join(dict.fromkeys(years[:4])))
     return f"folder_{digest}", clean, " / ".join(desc_terms), time_label, "annual" if time_label else "mixed"

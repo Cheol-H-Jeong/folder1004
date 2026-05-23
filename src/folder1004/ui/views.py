@@ -11,8 +11,6 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from ..config import (
     CLASSIFICATION_GUIDANCE_PRESETS,
     Config,
-    ORGANIZE_MODE_METADATA_INDEX,
-    ORGANIZE_MODE_AGENT_TOPLEVEL,
     ORGANIZE_MODE_BUNDLE_REBUILD,
     ORGANIZE_MODE_FULL_REBUILD,
     ORGANIZE_MODE_PRESERVE_EXISTING,
@@ -459,8 +457,8 @@ class OrganizeView(QtWidgets.QWidget):
         mode_lbl.setStyleSheet("font-weight:600;")
         mode_lbl.setMinimumWidth(112)
         mode_hint = QtWidgets.QLabel(
-            "기본값은 기존 폴더/파일을 이동하지 않고 .folder1004 탐색 지도, 파일/폴더 인덱스, 문서 텍스트 캐시만 만듭니다. "
-            "파일을 실제로 옮기는 재정리 옵션은 선택 시에만 실행되며, 마지막 방식은 모든 하위 폴더까지 해체합니다."
+            "Folder1004는 다운로드/바탕화면처럼 어질러진 폴더를 실제 폴더 체계로 정리합니다. "
+            "앞의 세 방식은 현재 1-depth 폴더 내부를 해체하지 않고, 마지막 방식만 모든 하위 폴더까지 해체합니다."
         )
         mode_hint.setObjectName("ModeHint")
         mode_hint.setWordWrap(True)
@@ -473,17 +471,6 @@ class OrganizeView(QtWidgets.QWidget):
         mode_options_wrap = QtWidgets.QWidget()
         mode_options = FlowLayout(mode_options_wrap, margin=0, hspacing=20, vspacing=8)
 
-        self.rad_index = QtWidgets.QRadioButton("메타데이터/검색 인덱스 생성 (기본값·파일 이동 없음)")
-        self.rad_index.setToolTip(
-            "기존 폴더 구조와 파일명은 그대로 두고 .folder1004 아래에\n"
-            "에이전트/사람용 탐색 지도, 파일·폴더 인덱스, 문서 텍스트 캐시만 만듭니다."
-        )
-        self.rad_agent = QtWidgets.QRadioButton("에이전트 친화 최상위 정리 (파일 이동)")
-        self.rad_agent.setToolTip(
-            "현재 폴더 바로 아래의 파일/폴더 묶음을 에이전트가 CLI에서 찾기 쉬운\n"
-            "연도·기관·프로젝트·용도 중심 최상위 Folder1004 체계로 옮깁니다.\n"
-            "하위 폴더 내부 구조는 해체하지 않습니다."
-        )
         self.rad_bundle = QtWidgets.QRadioButton("새 폴더 체계로 정리 (파일 이동)")
         self.rad_bundle.setToolTip(
             "현재 폴더 바로 아래의 파일/폴더 묶음만 새 Folder1004 체계로 옮깁니다.\n"
@@ -511,16 +498,14 @@ class OrganizeView(QtWidgets.QWidget):
         self.rad_add = self.rad_folder1004
 
         current_mode = normalize_organize_mode(getattr(self.config, "organize_mode", ""))
-        self.rad_index.setChecked(current_mode == ORGANIZE_MODE_METADATA_INDEX)
-        self.rad_agent.setChecked(current_mode == ORGANIZE_MODE_AGENT_TOPLEVEL)
         self.rad_bundle.setChecked(current_mode == ORGANIZE_MODE_BUNDLE_REBUILD)
         self.rad_existing.setChecked(current_mode == ORGANIZE_MODE_PRESERVE_EXISTING)
         self.rad_folder1004.setChecked(current_mode == ORGANIZE_MODE_PRESERVE_FOLDER1004)
         self.rad_full.setChecked(current_mode == ORGANIZE_MODE_FULL_REBUILD)
-        if not (self.rad_index.isChecked() or self.rad_agent.isChecked() or self.rad_bundle.isChecked() or self.rad_existing.isChecked() or self.rad_folder1004.isChecked() or self.rad_full.isChecked()):
-            self.rad_index.setChecked(True)
+        if not (self.rad_bundle.isChecked() or self.rad_existing.isChecked() or self.rad_folder1004.isChecked() or self.rad_full.isChecked()):
+            self.rad_bundle.setChecked(True)
         mode_grp = QtWidgets.QButtonGroup(self)
-        for rb in (self.rad_index, self.rad_agent, self.rad_bundle, self.rad_existing, self.rad_folder1004, self.rad_full):
+        for rb in (self.rad_bundle, self.rad_existing, self.rad_folder1004, self.rad_full):
             mode_grp.addButton(rb)
             mode_options.addWidget(rb)
             rb.toggled.connect(self._sync_mode_buttons)
@@ -630,9 +615,9 @@ class OrganizeView(QtWidgets.QWidget):
         self.btn_preview.setObjectName("Ghost")
         self.btn_preview.setToolTip("분석이 끝나면 드래그앤드롭으로 분류를 조정한 뒤 실제 정리를 실행합니다.")
         self.btn_preview.clicked.connect(lambda: self._on_start("preview"))
-        self.btn_primary = QtWidgets.QPushButton("인덱스 생성/업데이트")
+        self.btn_primary = QtWidgets.QPushButton("바로 끝까지 정리")
         self.btn_primary.setObjectName("Primary")
-        self.btn_primary.setToolTip("선택한 방식으로 실행합니다. 기본값은 파일 이동 없이 .folder1004 인덱스만 생성합니다.")
+        self.btn_primary.setToolTip("선택한 방식으로 분석과 실제 정리를 한 번에 끝까지 실행합니다.")
         self.btn_primary.clicked.connect(lambda: self._on_start("run"))
         self.btn_cancel = QtWidgets.QPushButton("취소")
         self.btn_cancel.setObjectName("Ghost")
@@ -754,17 +739,11 @@ class OrganizeView(QtWidgets.QWidget):
     def _sync_mode_buttons(self):
         if not hasattr(self, "btn_preview"):
             return
-        is_index = bool(getattr(self, "rad_index", None) and self.rad_index.isChecked())
         running = bool(getattr(self, "_running", False))
-        self.btn_preview.setDisabled(running or is_index)
-        if is_index:
-            self.btn_preview.setToolTip("메타데이터/검색 인덱스 생성은 파일 이동 계획이 없어서 미리보기가 필요하지 않습니다.")
-            self.btn_primary.setText("인덱스 생성/업데이트")
-            self.btn_primary.setToolTip("파일 이동 없이 .folder1004 탐색 지도, 인덱스, 문서 텍스트 캐시를 생성/갱신합니다.")
-        else:
-            self.btn_preview.setToolTip("분석이 끝나면 드래그앤드롭으로 분류를 조정한 뒤 실제 정리를 실행합니다.")
-            self.btn_primary.setText("바로 끝까지 정리")
-            self.btn_primary.setToolTip("선택한 파일 이동 방식으로 분석과 실제 정리를 한 번에 끝까지 실행합니다.")
+        self.btn_preview.setDisabled(running)
+        self.btn_preview.setToolTip("분석이 끝나면 드래그앤드롭으로 분류를 조정한 뒤 실제 정리를 실행합니다.")
+        self.btn_primary.setText("바로 끝까지 정리")
+        self.btn_primary.setToolTip("선택한 파일 이동 방식으로 분석과 실제 정리를 한 번에 끝까지 실행합니다.")
 
     # ------------------------------------------------------------------
     def refresh_api_badge(self):
@@ -806,14 +785,8 @@ class OrganizeView(QtWidgets.QWidget):
             mode = ORGANIZE_MODE_PRESERVE_FOLDER1004
         elif self.rad_existing.isChecked():
             mode = ORGANIZE_MODE_PRESERVE_EXISTING
-        elif self.rad_bundle.isChecked():
-            mode = ORGANIZE_MODE_BUNDLE_REBUILD
-        elif self.rad_agent.isChecked():
-            mode = ORGANIZE_MODE_AGENT_TOPLEVEL
         else:
-            mode = ORGANIZE_MODE_METADATA_INDEX
-        if mode == ORGANIZE_MODE_METADATA_INDEX:
-            action = "run"
+            mode = ORGANIZE_MODE_BUNDLE_REBUILD
         self.start_requested.emit(
             path, True,
             action == "preview", mode, action,

@@ -277,9 +277,9 @@ def test_default_mode_explains_auto_decision():
     view = OrganizeView(Config())
     labels = [child.text() for child in view.findChildren(QtWidgets.QLabel)]
     radios = [child.text() for child in view.findChildren(QtWidgets.QRadioButton)]
-    assert any("파일 이동 없음" in text or "인덱스" in text for text in labels + radios)
-    assert getattr(view, "rad_index").isChecked()
-    assert not getattr(view, "rad_agent").isChecked()
+    assert any("실제 폴더 체계로 정리" in text or "새 폴더 체계" in text for text in labels + radios)
+    assert getattr(view, "rad_new").isChecked()
+    assert not hasattr(view, "rad_index")
     view.close()
 
 
@@ -326,7 +326,7 @@ def test_organize_view_removes_dry_run_checkbox_and_emits_live_run(tmp_path, mon
     view._on_start()
     assert emitted
     assert emitted[-1][2] is False
-    assert emitted[-1][3] == "metadata_index"
+    assert emitted[-1][3] == "bundle_rebuild"
     view.close()
 
 
@@ -367,7 +367,7 @@ def test_folder_mode_options_wrap_without_overlap():
     view.show()
     app.processEvents()
 
-    radios = [view.rad_index, view.rad_agent, view.rad_new, view.rad_inc, view.rad_add]
+    radios = [view.rad_new, view.rad_inc, view.rad_add, view.rad_full]
     rects = [
         QtCore.QRect(radio.mapTo(view, QtCore.QPoint(0, 0)), radio.size()).adjusted(1, 1, -1, -1)
         for radio in radios
@@ -434,23 +434,23 @@ def test_recursive_is_always_on_and_actions_are_split(tmp_path, monkeypatch):
     assert view.chk_recursive.isChecked()
     assert not view.chk_recursive.isEnabled()
     assert view.btn_preview.text() == "분석 후 미리보기"
-    assert not view.btn_preview.isEnabled()
-    assert view.btn_primary.text() == "인덱스 생성/업데이트"
+    assert view.btn_preview.isEnabled()
+    assert view.btn_primary.text() == "바로 끝까지 정리"
 
     seen = []
     view.start_requested.connect(lambda *args: seen.append(args))
     view._on_start("preview")
     assert seen[-1][1] is True
-    assert seen[-1][2] is False
-    assert seen[-1][3] == "metadata_index"
-    assert seen[-1][4] == "run"
+    assert seen[-1][2] is True
+    assert seen[-1][3] == "bundle_rebuild"
+    assert seen[-1][4] == "preview"
     view.set_running(False)
-    view.rad_agent.setChecked(True)
+    view.rad_inc.setChecked(True)
     assert view.btn_preview.isEnabled()
     assert view.btn_primary.text() == "바로 끝까지 정리"
     view._on_start("preview")
     assert seen[-1][2] is True
-    assert seen[-1][3] == "agent_toplevel"
+    assert seen[-1][3] == "preserve_existing"
     assert seen[-1][4] == "preview"
     view.set_running(False)
     view._on_start("run")

@@ -528,25 +528,9 @@ class Planner:
         self.seed_categories: list[dict] = list(seed_categories or [])
 
     def _classification_guidance(self) -> str:
-        from .config import (
-            ORGANIZE_MODE_AGENT_TOPLEVEL,
-            combined_classification_guidance,
-            normalize_organize_mode,
-        )
+        from .config import combined_classification_guidance
 
-        user_guidance = combined_classification_guidance(self.config)
-        mode = normalize_organize_mode(getattr(self.config, "organize_mode", ""))
-        if mode != ORGANIZE_MODE_AGENT_TOPLEVEL:
-            return user_guidance
-        agent_guidance = (
-            "에이전트 친화 최상위 정리 모드다. 현재 1-depth 폴더는 하나의 묶음으로만 분류하고 "
-            "그 내부 하위 폴더/파일 체계를 해체하거나 새 기준으로 세분화하지 않는다고 가정하라. "
-            "새 최상위 Folder1004 카테고리명은 CLI 탐색과 검색에 강해야 한다: "
-            "연도/기간, 기관·고객·프로젝트·시스템명, 업무흐름/문서용도를 짧고 구체적인 검색 토큰으로 포함하라. "
-            "'문서', '자료', '기타'처럼 정보량 낮은 이름을 피하고, 비슷한 프로젝트 묶음은 같은 그룹 번호에 인접하게 하라. "
-            "폴더 묶음 항목의 기존 폴더명은 중요한 힌트지만, 최상위 카탈로그 이름은 에이전트가 수십만 파일에서 빠르게 후보 범위를 좁히도록 설계하라."
-        )
-        return "\n".join(part for part in (agent_guidance, user_guidance) if part.strip())
+        return combined_classification_guidance(self.config)
 
     def _llm_call(
         self,

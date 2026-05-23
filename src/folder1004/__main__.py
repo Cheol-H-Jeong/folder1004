@@ -73,14 +73,6 @@ def _run_cli(args) -> int:
         f"shortcuts={op.total_shortcuts} skipped={op.total_skipped} "
         f"categories={len(op.categories)}"
     )
-    agent_index = getattr(op, "agent_index", None)
-    if agent_index is not None:
-        print(
-            f"Index — .folder1004 updated; folders={agent_index.folders} "
-            f"docs(parsed/reused/failed)={agent_index.docs_parsed}/{agent_index.docs_reused}/{agent_index.docs_failed}"
-        )
-        if agent_index.agent_map:
-            print(f"Map   — {agent_index.agent_map}")
     if op.llm_usage is not None:
         u = op.llm_usage
         if u.model == "mock" or u.request_count == 0:
@@ -122,22 +114,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--mode",
         choices=[
-            "metadata_index",
-            "index",
-            "metadata",
-            "prepare",
-            "agent_toplevel",
             "bundle_rebuild",
             "preserve_existing",
             "preserve_folder1004",
             "full_rebuild",
-            "agent",
-            "agent_top",
             "new",
             "incremental",
             "additive",
         ],
-        help="folder handling mode for --cli (default: metadata_index; physical reorganization requires explicit mode)",
+        help="folder handling mode for --cli (default: bundle_rebuild / 새 폴더 체계로 정리)",
     )
     parser.add_argument(
         "--no-economy",

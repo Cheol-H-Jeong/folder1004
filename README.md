@@ -1,6 +1,6 @@
 # Folder1004
 
-LLM-powered folder auto-organizer for **Linux · macOS · Windows**.
+LLM-powered messy-folder auto-organizer for **Linux · macOS · Windows**.
 
 Folder1004 scans a folder you point it at, reads file names + metadata
 + the first page of document bodies (PDF/DOCX/PPTX/HWP/HWPX/XLSX/TXT/…),
@@ -15,6 +15,12 @@ It is designed for the folders people actually abandon: KakaoTalk
 downloads, browser Downloads, Desktop, Documents, class folders,
 studio shoot folders, admin paperwork, and semester-long student
 archives.
+
+Folder1004 is the **physical GUI organizer**: it creates a clearer
+Folder1004 folder structure and moves loose files or intact top-level
+folder bundles into it.  If you need a non-destructive agent/CLI
+knowledge map that leaves the user's existing structure untouched, use
+the separate **Jikji** project instead.
 
 - **Pluggable LLM**: Google Gemini *or* any OpenAI-compatible endpoint
   (OpenAI · OpenRouter · Together · Groq · Anthropic-via-gateway ·
