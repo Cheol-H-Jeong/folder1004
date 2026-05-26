@@ -306,22 +306,22 @@ def run(
         entries, bundle_count, _skipped = _entries_with_top_level_bundles(target_root, entries)
         if progress:
             progress(
-                f"plan: 새 폴더 체계로 정리 — 기존 하위 폴더 {bundle_count}개를 해체하지 않고 묶음으로 분류",
+                f"plan: 1. 완전 카오스 모드 — 기존 하위 폴더 {bundle_count}개를 해체하지 않고 새 폴더 체계로 정리",
                 0.06,
             )
     elif mode == ORGANIZE_MODE_PRESERVE_EXISTING:
-        # 기존 폴더 체계 유지 — 기존 최상위 폴더 전체를 카테고리로 활용하고,
+        # 2. 정리 중에 손놓은 모드 — 기존 최상위 폴더 전체를 카테고리로 활용하고,
         # 루트에 흩어진 파일만 기존/신규 폴더로 보낸다.
         seed_categories = _seed_categories_from_disk(target_root, fa_only=False)
         entries, skipped_nested = _root_file_entries_only(target_root, entries)
         if progress:
             progress(
-                f"plan: 기존 폴더 체계 유지 — 기존 폴더 {len(seed_categories)}개 활용 / "
+                f"plan: 2. 정리 중에 손놓은 모드 — 기존 폴더 {len(seed_categories)}개 유지·네이밍 정돈 / "
                 f"하위 폴더 내부 파일 {skipped_nested}개 보존 / 새 분류 대상 {len(entries)}개",
                 0.06,
             )
     elif mode == ORGANIZE_MODE_PRESERVE_FOLDER1004:
-        # Folder1004 폴더만 유지 — signed folders are kept untouched;
+        # 3. Folder1004로 정리하던 모드 — signed folders are kept untouched;
         # unsigned folders are moved as intact bundles, not dissolved.
         seed_categories = _seed_categories_from_disk(target_root, fa_only=True)
         entries, bundle_count, skipped_in_folder1004 = _entries_with_top_level_bundles(
@@ -329,7 +329,7 @@ def run(
         )
         if progress:
             progress(
-                f"plan: Folder1004 폴더만 유지 — 기존 Folder1004 폴더 {len(seed_categories)}개 / "
+                f"plan: 3. Folder1004로 정리하던 모드 — 기존 Folder1004 폴더 {len(seed_categories)}개 유지 / "
                 f"이미 분류된 파일 {skipped_in_folder1004}개 건너뜀 / "
                 f"일반 하위 폴더 {bundle_count}개는 묶음으로 분류 / 새 분류 대상 {len(entries)}개",
                 0.06,
@@ -337,7 +337,7 @@ def run(
     elif mode == ORGANIZE_MODE_FULL_REBUILD:
         if progress:
             progress(
-                "plan: 모든 폴더 해체 후 재정리 — 기존 폴더명은 참고 힌트로만 사용",
+                "plan: 4. 특별 모드 — 모든 하위 폴더 해체 후 재정리 / 기존 폴더명은 참고 힌트로만 사용",
                 0.06,
             )
 

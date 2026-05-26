@@ -457,8 +457,8 @@ class OrganizeView(QtWidgets.QWidget):
         mode_lbl.setStyleSheet("font-weight:600;")
         mode_lbl.setMinimumWidth(112)
         mode_hint = QtWidgets.QLabel(
-            "Folder1004는 다운로드/바탕화면처럼 어질러진 폴더를 실제 폴더 체계로 정리합니다. "
-            "앞의 세 방식은 현재 1-depth 폴더 내부를 해체하지 않고, 마지막 방식만 모든 하위 폴더까지 해체합니다."
+            "처음이면 1번을 고르면 됩니다. 1~3번은 현재 하위 폴더 안을 파일 단위로 해체하지 않고, "
+            "4번 특별 모드만 모든 하위 폴더를 풀어서 다시 분류합니다."
         )
         mode_hint.setObjectName("ModeHint")
         mode_hint.setWordWrap(True)
@@ -471,25 +471,26 @@ class OrganizeView(QtWidgets.QWidget):
         mode_options_wrap = QtWidgets.QWidget()
         mode_options = FlowLayout(mode_options_wrap, margin=0, hspacing=20, vspacing=8)
 
-        self.rad_bundle = QtWidgets.QRadioButton("새 폴더 체계로 정리 (파일 이동)")
+        self.rad_bundle = QtWidgets.QRadioButton("1. 완전 카오스 모드 — 전부 새 폴더로 정리")
         self.rad_bundle.setToolTip(
-            "현재 폴더 바로 아래의 파일/폴더 묶음만 새 Folder1004 체계로 옮깁니다.\n"
-            "하위 폴더 내부는 해체하지 않습니다."
+            "모든 분류를 손 놓은 상태라고 보고, 현재 폴더 바로 아래의 파일과 하위 폴더를\n"
+            "새 Folder1004 폴더 체계 안으로 정리합니다. 하위 폴더 내부는 해체하지 않고 통째로 옮깁니다."
         )
-        self.rad_existing = QtWidgets.QRadioButton("기존 폴더 체계 유지하며 정리 (파일 이동)")
+        self.rad_existing = QtWidgets.QRadioButton("2. 정리 중에 손놓은 모드 — 기존 폴더는 유지")
         self.rad_existing.setToolTip(
-            "현재 1-depth 기존 폴더는 그대로 두고, 루트에 흩어진 파일만 기존 폴더나\n"
-            "새 Folder1004 폴더에 넣습니다. 기존 폴더 내부는 건드리지 않습니다."
+            "현재 하위 폴더는 어느 정도 정리된 상태로 봅니다. 기존 폴더는 재분류하지 않고\n"
+            "이름만 Folder1004 기준으로 일관되게 표시하며, 막 저장된 루트 파일만 기존/새 폴더로 정리합니다."
         )
-        self.rad_folder1004 = QtWidgets.QRadioButton("Folder1004 폴더만 유지하며 정리 (파일 이동)")
+        self.rad_folder1004 = QtWidgets.QRadioButton("3. Folder1004로 정리하던 모드 — 추가분만 정리")
         self.rad_folder1004.setToolTip(
-            "현재 1-depth의 Folder1004 서명 폴더는 그대로 두고, 그 밖의 파일과 일반 폴더만\n"
-            "묶음 단위로 기존/새 Folder1004 폴더에 정리합니다."
+            "한번 Folder1004로 정리한 폴더에 파일/폴더가 다시 쌓였을 때 사용합니다.\n"
+            "기존 Folder1004 폴더는 그대로 두고, 새로 쌓인 일반 파일/폴더만 기존/새 Folder1004 폴더로 정리합니다."
         )
-        self.rad_full = QtWidgets.QRadioButton("모든 폴더 해체 후 재정리 (주의)")
+        self.rad_full = QtWidgets.QRadioButton("4. ⚠ 특별 모드 — 모든 하위 폴더 해체 후 재정리")
+        self.rad_full.setObjectName("DangerRadio")
         self.rad_full.setToolTip(
-            "모든 하위 폴더 안의 파일까지 모두 꺼내 파일 단위로 다시 분류합니다.\n"
-            "기존 폴더명은 참고 힌트로만 사용합니다."
+            "주의: 모든 하위 폴더 안의 파일까지 꺼내 파일 단위로 다시 분류합니다.\n"
+            "기존 폴더명은 참고 힌트로만 사용하며, 현재 폴더 구조는 유지되지 않습니다."
         )
 
         # Backwards-compatible attribute names used by older tests/plugins.
@@ -777,9 +778,10 @@ class OrganizeView(QtWidgets.QWidget):
             mode = ORGANIZE_MODE_FULL_REBUILD
             QtWidgets.QMessageBox.warning(
                 self,
-                "모든 폴더 해체 후 재정리",
-                "주의: 이 방식은 하위 폴더 안의 파일까지 모두 꺼내 파일 단위로 다시 분류합니다.\n"
-                "기존 폴더명은 참고만 하며, 현재 폴더 구조는 유지되지 않습니다.",
+                "4. 특별 모드 — 모든 하위 폴더 해체 후 재정리",
+                "주의: 이 방식은 모든 하위 폴더 안의 파일까지 꺼내 파일 단위로 다시 분류합니다.\n"
+                "기존 폴더명은 참고만 하며, 현재 폴더 구조는 유지되지 않습니다.\n\n"
+                "1~3번과 달리 폴더 안쪽 구조까지 바뀔 수 있습니다.",
             )
         elif self.rad_folder1004.isChecked():
             mode = ORGANIZE_MODE_PRESERVE_FOLDER1004

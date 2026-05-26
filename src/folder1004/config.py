@@ -356,21 +356,21 @@ class Config:
     reclassify_mode: bool = False
 
     # User-facing organize mode chosen on the start screen:
-    #   "bundle_rebuild"       새 폴더 체계로 정리 — only the current
-    #                          1-depth top-level folders are reorganized as
-    #                          intact bundles under a new Folder1004 folder
-    #                          structure.  Legacy id: "new".
-    #   "preserve_existing"    기존 폴더 체계 유지 — only the current
-    #                          1-depth top-level folders are used as the
-    #                          catalogue and missing folders are added.
-    #                          Legacy id: "incremental".
-    #   "preserve_folder1004"  Folder1004 폴더만 유지 — only signed
-    #                          Folder1004 1-depth folders are kept, and new
-    #                          loose files/plain folders are sorted as intact
-    #                          bundles.  Legacy id: "additive".
-    #   "full_rebuild"         모든 폴더 해체 후 재정리 — recursively dissolve
-    #                          every subfolder and classify every file
-    #                          individually, using old folder names as hints.
+    #   "bundle_rebuild"       1. 완전 카오스 모드 — direct child files and
+    #                          folders are sorted into a new Folder1004
+    #                          structure; child folders move as intact bundles.
+    #                          Legacy id: "new".
+    #   "preserve_existing"    2. 정리 중에 손놓은 모드 — direct child folders
+    #                          are treated as already-curated categories and
+    #                          only loose root files are added to existing/new
+    #                          folders.  Legacy id: "incremental".
+    #   "preserve_folder1004"  3. Folder1004로 정리하던 모드 — signed
+    #                          Folder1004 folders are kept; newly accumulated
+    #                          files/plain folders are sorted as intact bundles.
+    #                          Legacy id: "additive".
+    #   "full_rebuild"         4. 특별 모드 — recursively dissolve every
+    #                          subfolder and classify every file individually,
+    #                          using old folder names as hints.
     organize_mode: str = ORGANIZE_MODE_BUNDLE_REBUILD
 
     # Duplicate-file dedup threshold (bytes).  When ≥ 2 files share

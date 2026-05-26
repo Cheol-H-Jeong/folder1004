@@ -143,6 +143,10 @@ QHeaderView::section {
 }
 
 QCheckBox { spacing: 8px; }
+QRadioButton#DangerRadio {
+    color: #b3261e;
+    font-weight: 700;
+}
 
 QStatusBar { background: #efeff2; color: #6e6e73; }
 
@@ -272,6 +276,10 @@ QHeaderView::section {
 }
 
 QStatusBar { background: #232326; color: #a1a1a6; }
+QRadioButton#DangerRadio {
+    color: #ff9f0a;
+    font-weight: 700;
+}
 
 QPushButton#PresetTag {
     background: #2c2c30;

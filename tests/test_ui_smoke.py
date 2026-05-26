@@ -269,6 +269,16 @@ def test_guidance_toggle_checked_state_has_visible_style():
         assert "font-weight" in checked_block
 
 
+
+def test_danger_mode_has_special_radio_style():
+    from folder1004.ui.styles import DARK_QSS, LIGHT_QSS
+
+    for qss in (LIGHT_QSS, DARK_QSS):
+        assert "QRadioButton#DangerRadio" in qss
+        block = qss.split("QRadioButton#DangerRadio", 1)[1].split("}", 1)[0]
+        assert "font-weight" in block
+
+
 def test_default_mode_explains_auto_decision():
     from folder1004.config import Config
     from folder1004.ui.views import OrganizeView
@@ -277,8 +287,14 @@ def test_default_mode_explains_auto_decision():
     view = OrganizeView(Config())
     labels = [child.text() for child in view.findChildren(QtWidgets.QLabel)]
     radios = [child.text() for child in view.findChildren(QtWidgets.QRadioButton)]
-    assert any("실제 폴더 체계로 정리" in text or "새 폴더 체계" in text for text in labels + radios)
+    all_text = "\n".join(labels + radios)
+    assert "처음이면 1번" in all_text
+    assert "1. 완전 카오스 모드" in all_text
+    assert "2. 정리 중에 손놓은 모드" in all_text
+    assert "3. Folder1004로 정리하던 모드" in all_text
+    assert "4. ⚠ 특별 모드" in all_text
     assert getattr(view, "rad_new").isChecked()
+    assert view.rad_full.objectName() == "DangerRadio"
     assert not hasattr(view, "rad_index")
     view.close()
 

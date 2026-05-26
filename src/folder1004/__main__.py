@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
             "incremental",
             "additive",
         ],
-        help="folder handling mode for --cli (default: bundle_rebuild / 새 폴더 체계로 정리)",
+        help="folder handling mode for --cli (default: bundle_rebuild / 1. 완전 카오스 모드)",
     )
     parser.add_argument(
         "--no-economy",
